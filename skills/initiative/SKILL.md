@@ -52,6 +52,16 @@ When multiple tasks are pending, dispatch them to subagents running in parallel:
 - Each subagent should call `get_next_task`, do the work, then call `complete_task` or `fail_task`
 - After all subagents complete, go back to step 1
 
+## Context Management
+
+Long autonomous sessions can exhaust the context window. Follow these rules to stay efficient:
+
+- **Use `get_summary` instead of `list_tasks`** when you only need an overview of what's pending
+- **Delegate fully to subagents** — subagents should read files, run tests, and commit independently. Don't have them return large file contents or test output back to the main loop
+- **Keep task results concise** — when calling `complete_task`, write a 1-2 sentence summary, not a full log
+- **Don't re-read files you already understand** — if you read a file earlier in the session and haven't changed it, trust your memory
+- **Batch related operations** — combine git add + commit into single shell calls rather than separate tool calls
+
 ## Rules
 
 - **Never stop** unless the user says to stop

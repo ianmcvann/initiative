@@ -431,3 +431,30 @@ def test_get_status_no_pending_tasks(store):
     store.complete_task(task_id)
     status = store.get_status()
     assert status["oldest_pending_task_age_seconds"] is None
+
+
+def test_get_summary_all(store):
+    """get_summary returns lightweight task info."""
+    store.add_task("Task 1", "long description here", priority=5)
+    store.add_task("Task 2", "another long description", priority=10)
+    summaries = store.get_summary()
+    assert len(summaries) == 2
+    # Should be ordered by priority DESC
+    assert summaries[0]["title"] == "Task 2"
+    assert summaries[0]["priority"] == 10
+    # Should only have id, title, status, priority - no description
+    assert "description" not in summaries[0]
+
+
+def test_get_summary_filtered(store):
+    """get_summary can filter by status."""
+    store.add_task("Pending", "desc")
+    task_id = store.add_task("Will complete", "desc", priority=10)
+    store.get_next_task()
+    store.complete_task(task_id)
+    pending = store.get_summary(status=TaskStatus.PENDING)
+    assert len(pending) == 1
+    assert pending[0]["title"] == "Pending"
+    completed = store.get_summary(status=TaskStatus.COMPLETED)
+    assert len(completed) == 1
+    assert completed[0]["title"] == "Will complete"

@@ -218,6 +218,23 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
         logger.info("get_status called")
         return json.dumps(store.get_status())
 
+    @mcp.tool()
+    async def get_summary(status: Optional[str] = None) -> str:
+        """Get a lightweight summary of tasks (id, title, status, priority only).
+        Use this instead of list_tasks when you only need an overview to save context.
+
+        Args:
+            status: Filter by status (pending, in_progress, completed, failed). Omit for all.
+        """
+        logger.info("get_summary called: status=%r", status)
+        try:
+            task_status = TaskStatus(status) if status else None
+        except ValueError:
+            valid = ", ".join(str(s) for s in TaskStatus)
+            return json.dumps({"error": f"Invalid status. Must be one of: {valid}"})
+        tasks = store.get_summary(status=task_status)
+        return json.dumps({"tasks": tasks, "count": len(tasks)})
+
     return mcp
 
 

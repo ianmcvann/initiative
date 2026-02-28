@@ -270,6 +270,19 @@ class TaskStore:
             "oldest_pending_task_age_seconds": oldest_pending_age,
         }
 
+    def get_summary(self, status: TaskStatus | None = None) -> list[dict]:
+        """Return lightweight task summaries (id, title, status, priority only)."""
+        if status is not None:
+            rows = self._conn.execute(
+                "SELECT id, title, status, priority FROM tasks WHERE status = ? ORDER BY priority DESC, created_at ASC",
+                (str(status),),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT id, title, status, priority FROM tasks ORDER BY priority DESC, created_at ASC"
+            ).fetchall()
+        return [{"id": r["id"], "title": r["title"], "status": r["status"], "priority": r["priority"]} for r in rows]
+
     def get_blocked_by(self, task_id: int) -> list[int]:
         """Return IDs of uncompleted tasks that this task depends on."""
         rows = self._conn.execute(

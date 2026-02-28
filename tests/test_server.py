@@ -327,3 +327,33 @@ async def test_list_tasks_invalid_status(server):
     """list_tasks returns error for invalid status string."""
     data = await call_tool(server, "list_tasks", {"status": "bogus"})
     assert "error" in data
+
+
+@pytest.mark.anyio
+async def test_get_summary_tool(server):
+    """get_summary returns lightweight task info."""
+    await call_tool(server, "add_task", {"title": "T1", "description": "long desc", "priority": 5})
+    await call_tool(server, "add_task", {"title": "T2", "description": "long desc", "priority": 10})
+    data = await call_tool(server, "get_summary")
+    assert data["count"] == 2
+    assert "description" not in data["tasks"][0]
+    assert data["tasks"][0]["title"] == "T2"  # higher priority first
+
+
+@pytest.mark.anyio
+async def test_get_summary_filtered(server):
+    """get_summary can filter by status."""
+    await call_tool(server, "add_task", {"title": "Pending", "description": "d"})
+    await call_tool(server, "add_task", {"title": "Done", "description": "d", "priority": 10})
+    await call_tool(server, "get_next_task")
+    await call_tool(server, "complete_task", {"task_id": 2})
+    data = await call_tool(server, "get_summary", {"status": "pending"})
+    assert data["count"] == 1
+    assert data["tasks"][0]["title"] == "Pending"
+
+
+@pytest.mark.anyio
+async def test_get_summary_invalid_status(server):
+    """get_summary returns error for invalid status."""
+    data = await call_tool(server, "get_summary", {"status": "bogus"})
+    assert "error" in data
