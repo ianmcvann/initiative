@@ -749,3 +749,50 @@ async def test_decompose_subtask_priority_out_of_range(server):
     })
     assert "error" in data
     assert "priority" in data["error"].lower()
+
+
+# --- get_task tool tests ---
+
+
+@pytest.mark.anyio
+async def test_get_task_found(server):
+    """get_task returns full details for an existing task."""
+    add_data = await call_tool(server, "add_task", {
+        "title": "My Task",
+        "description": "Detailed description",
+        "priority": 7,
+        "tags": ["bug", "urgent"],
+    })
+    task_id = add_data["task_id"]
+    data = await call_tool(server, "get_task", {"task_id": task_id})
+    assert "task" in data
+    task = data["task"]
+    assert task["id"] == task_id
+    assert task["title"] == "My Task"
+    assert task["description"] == "Detailed description"
+    assert task["priority"] == 7
+    assert task["status"] == "pending"
+    assert "bug" in task["tags"]
+    assert "urgent" in task["tags"]
+    assert "created_at" in task
+    assert "updated_at" in task
+
+
+@pytest.mark.anyio
+async def test_get_task_not_found(server):
+    """get_task returns error for a nonexistent task ID."""
+    data = await call_tool(server, "get_task", {"task_id": 999})
+    assert data["error"] == "Task not found"
+    assert data["task_id"] == 999
+
+
+@pytest.mark.anyio
+async def test_get_task_invalid_id(server):
+    """get_task rejects invalid task IDs (0 and negative)."""
+    data = await call_tool(server, "get_task", {"task_id": 0})
+    assert "error" in data
+    assert "positive integer" in data["error"]
+
+    data = await call_tool(server, "get_task", {"task_id": -1})
+    assert "error" in data
+    assert "positive integer" in data["error"]

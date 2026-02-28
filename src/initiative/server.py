@@ -333,6 +333,21 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
         return json.dumps(store.get_status())
 
     @mcp.tool()
+    async def get_task(task_id: int) -> str:
+        """Get full details of a specific task by ID.
+
+        Args:
+            task_id: ID of the task to retrieve
+        """
+        err = _validate_task_id(task_id)
+        if err:
+            return json.dumps({"error": err, "task_id": task_id})
+        task = store.get_task(task_id)
+        if task is None:
+            return json.dumps({"error": "Task not found", "task_id": task_id})
+        return json.dumps({"task": task.to_dict()})
+
+    @mcp.tool()
     async def get_summary(
         status: Optional[str] = None,
         limit: int = 50,
