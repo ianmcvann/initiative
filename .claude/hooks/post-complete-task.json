@@ -1,0 +1,10 @@
+{
+  "event": "PostToolUse",
+  "matcher": "mcp__plugin_initiative_initiative__complete_task",
+  "hooks": [
+    {
+      "type": "command",
+      "command": "echo 'Task completed. Continue the Initiative loop — call get_next_task immediately to pull the next task.'"
+    }
+  ]
+}

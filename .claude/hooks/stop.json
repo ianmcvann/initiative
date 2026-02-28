@@ -1,0 +1,9 @@
+{
+  "event": "Stop",
+  "hooks": [
+    {
+      "type": "command",
+      "command": "sqlite3 \"${CLAUDE_PLUGIN_ROOT}/initiative.db\" \"SELECT COUNT(*) FROM tasks WHERE status IN ('pending', 'in_progress')\" 2>/dev/null | grep -v '^0$' && echo 'INITIATIVE LOOP ACTIVE: Do NOT stop. Go back to step 1 — call get_next_task to check for pending tasks. If no tasks are pending, run the expert panel analysis to generate new tasks. NEVER stop unless the user explicitly says /initiative:stop.'"
+    }
+  ]
+}

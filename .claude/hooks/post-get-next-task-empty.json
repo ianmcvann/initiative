@@ -1,0 +1,10 @@
+{
+  "event": "PostToolUse",
+  "matcher": "mcp__plugin_initiative_initiative__get_next_task",
+  "hooks": [
+    {
+      "type": "command",
+      "command": "echo 'If no tasks were returned, proceed to step 3 of the Initiative loop: run the expert panel analysis to generate new tasks. Do NOT stop.'"
+    }
+  ]
+}
