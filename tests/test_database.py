@@ -40,8 +40,8 @@ def test_complete_task(store):
     assert task.result == "Done successfully"
 
 
-def test_fail_task(store):
-    task_id = store.add_task("Task", "desc")
+def test_fail_task_with_no_retries(store):
+    task_id = store.add_task("Task", "desc", max_retries=0)
     store.get_next_task()
     store.fail_task(task_id, error="Something broke")
     task = store.get_task(task_id)
@@ -79,3 +79,79 @@ def test_get_status(store):
     assert status["in_progress"] == 1
     assert status["completed"] == 0
     assert status["failed"] == 0
+
+
+def test_auto_retry_on_fail(store):
+    """Task goes back to pending when retries < max_retries."""
+    task_id = store.add_task("Retry task", "desc", max_retries=2)
+    store.get_next_task()  # moves to in_progress
+
+    # First failure: retries 0 < max_retries 2, should auto-retry
+    store.fail_task(task_id, error="Error 1")
+    task = store.get_task(task_id)
+    assert task.status == TaskStatus.PENDING
+    assert task.retries == 1
+    assert task.error == "Error 1"
+
+    # Pick up again and fail again
+    store.get_next_task()
+    store.fail_task(task_id, error="Error 2")
+    task = store.get_task(task_id)
+    assert task.status == TaskStatus.PENDING
+    assert task.retries == 2
+    assert task.error == "Error 2"
+
+
+def test_permanent_failure_after_max_retries(store):
+    """Task stays failed when retries >= max_retries."""
+    task_id = store.add_task("Fail task", "desc", max_retries=1)
+    store.get_next_task()
+
+    # First failure: retries 0 < max_retries 1, should auto-retry
+    store.fail_task(task_id, error="Error 1")
+    task = store.get_task(task_id)
+    assert task.status == TaskStatus.PENDING
+    assert task.retries == 1
+
+    # Second failure: retries 1 >= max_retries 1, should permanently fail
+    store.get_next_task()
+    store.fail_task(task_id, error="Error 2")
+    task = store.get_task(task_id)
+    assert task.status == TaskStatus.FAILED
+    assert task.retries == 1
+    assert task.error == "Error 2"
+
+
+def test_manual_retry_task(store):
+    """Manual retry resets a failed task back to pending."""
+    task_id = store.add_task("Manual retry", "desc", max_retries=0)
+    store.get_next_task()
+    store.fail_task(task_id, error="Failed")
+    task = store.get_task(task_id)
+    assert task.status == TaskStatus.FAILED
+
+    # Manually retry
+    task = store.retry_task(task_id)
+    assert task.status == TaskStatus.PENDING
+    assert task.retries == 0
+    assert task.error is None
+
+
+def test_retry_task_not_failed(store):
+    """Manual retry on a non-failed task returns the task unchanged."""
+    task_id = store.add_task("Pending task", "desc")
+    task = store.retry_task(task_id)
+    assert task.status == TaskStatus.PENDING
+
+
+def test_retry_task_not_found(store):
+    """Manual retry on a non-existent task returns None."""
+    assert store.retry_task(999) is None
+
+
+def test_add_task_custom_max_retries(store):
+    """Tasks can be created with a custom max_retries value."""
+    task_id = store.add_task("Custom retries", "desc", max_retries=5)
+    task = store.get_task(task_id)
+    assert task.max_retries == 5
+    assert task.retries == 0

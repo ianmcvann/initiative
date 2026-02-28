@@ -56,15 +56,59 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
 
     @mcp.tool()
     async def fail_task(task_id: int, error: str = "") -> str:
-        """Mark a task as failed.
+        """Mark a task as failed. If the task has retries remaining, it will be
+        automatically requeued as pending instead of being marked as failed.
 
         Args:
             task_id: ID of the task that failed
             error: Description of what went wrong
         """
         logger.info("fail_task called: task_id=%d", task_id)
-        store.fail_task(task_id, error)
-        return json.dumps({"task_id": task_id, "status": "failed", "error": error})
+        task = store.fail_task(task_id, error)
+        if task is None:
+            return json.dumps({"error": "Task not found", "task_id": task_id})
+        if task.status == TaskStatus.PENDING:
+            return json.dumps({
+                "task_id": task_id,
+                "status": "pending",
+                "message": f"Task auto-retried (attempt {task.retries}/{task.max_retries})",
+                "retries": task.retries,
+                "max_retries": task.max_retries,
+                "error": error,
+            })
+        return json.dumps({
+            "task_id": task_id,
+            "status": "failed",
+            "message": "Task permanently failed after exhausting all retries",
+            "retries": task.retries,
+            "max_retries": task.max_retries,
+            "error": error,
+        })
+
+    @mcp.tool()
+    async def retry_task(task_id: int) -> str:
+        """Manually retry a failed task by resetting it to pending status.
+
+        Args:
+            task_id: ID of the failed task to retry
+        """
+        logger.info("retry_task called: task_id=%d", task_id)
+        # Check current task status before attempting retry
+        current = store.get_task(task_id)
+        if current is None:
+            return json.dumps({"error": "Task not found", "task_id": task_id})
+        if current.status != TaskStatus.FAILED:
+            return json.dumps({
+                "error": "Task is not in failed status",
+                "task_id": task_id,
+                "status": str(current.status),
+            })
+        task = store.retry_task(task_id)
+        return json.dumps({
+            "task_id": task_id,
+            "status": "pending",
+            "message": "Task has been requeued for retry",
+        })
 
     @mcp.tool()
     async def list_tasks(status: Optional[str] = None) -> str:

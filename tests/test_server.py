@@ -47,12 +47,27 @@ async def test_complete_task_tool(server):
 
 
 @pytest.mark.anyio
-async def test_fail_task_tool(server):
+async def test_fail_task_tool_auto_retry(server):
+    """With default max_retries=2, first failure auto-retries."""
     add_data = await call_tool(server, "add_task", {"title": "Task", "description": "desc"})
     task_id = add_data["task_id"]
     await call_tool(server, "get_next_task")
     data = await call_tool(server, "fail_task", {"task_id": task_id, "error": "Broke"})
+    assert data["status"] == "pending"
+    assert data["retries"] == 1
+    assert data["max_retries"] == 2
+    assert "auto-retried" in data["message"]
+
+
+@pytest.mark.anyio
+async def test_fail_task_tool_permanent(server):
+    """With max_retries=0, failure is permanent."""
+    add_data = await call_tool(server, "add_task", {"title": "Task", "description": "desc", "max_retries": 0})
+    task_id = add_data["task_id"]
+    await call_tool(server, "get_next_task")
+    data = await call_tool(server, "fail_task", {"task_id": task_id, "error": "Broke"})
     assert data["status"] == "failed"
+    assert "permanently failed" in data["message"]
 
 
 @pytest.mark.anyio
@@ -79,3 +94,58 @@ async def test_get_status_tool(server):
     data = await call_tool(server, "get_status")
     assert data["total"] == 2
     assert data["pending"] == 2
+
+
+@pytest.mark.anyio
+async def test_retry_task_tool(server):
+    """Manual retry requeues a failed task."""
+    add_data = await call_tool(server, "add_task", {"title": "Fail me", "description": "d", "max_retries": 0})
+    task_id = add_data["task_id"]
+    await call_tool(server, "get_next_task")
+    await call_tool(server, "fail_task", {"task_id": task_id, "error": "Broke"})
+    data = await call_tool(server, "retry_task", {"task_id": task_id})
+    assert data["status"] == "pending"
+    assert data["message"] == "Task has been requeued for retry"
+
+
+@pytest.mark.anyio
+async def test_retry_task_not_failed(server):
+    """Manual retry on a non-failed task returns an error."""
+    add_data = await call_tool(server, "add_task", {"title": "Pending", "description": "d"})
+    task_id = add_data["task_id"]
+    data = await call_tool(server, "retry_task", {"task_id": task_id})
+    assert "error" in data
+    assert data["status"] == "pending"
+
+
+@pytest.mark.anyio
+async def test_retry_task_not_found(server):
+    """Manual retry on a non-existent task returns an error."""
+    data = await call_tool(server, "retry_task", {"task_id": 999})
+    assert data["error"] == "Task not found"
+
+
+@pytest.mark.anyio
+async def test_add_task_with_max_retries(server):
+    """add_task accepts optional max_retries parameter."""
+    data = await call_tool(server, "add_task", {"title": "Custom", "description": "d", "max_retries": 5})
+    assert data["max_retries"] == 5
+
+
+@pytest.mark.anyio
+async def test_auto_retry_full_cycle(server):
+    """Task auto-retries through all attempts then permanently fails."""
+    add_data = await call_tool(server, "add_task", {"title": "Fragile", "description": "d", "max_retries": 1})
+    task_id = add_data["task_id"]
+
+    # First attempt fails - should auto-retry
+    await call_tool(server, "get_next_task")
+    data = await call_tool(server, "fail_task", {"task_id": task_id, "error": "Error 1"})
+    assert data["status"] == "pending"
+    assert data["retries"] == 1
+
+    # Second attempt fails - should permanently fail
+    await call_tool(server, "get_next_task")
+    data = await call_tool(server, "fail_task", {"task_id": task_id, "error": "Error 2"})
+    assert data["status"] == "failed"
+    assert "permanently failed" in data["message"]

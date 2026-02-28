@@ -24,6 +24,8 @@ class Task:
     worker_id: str | None = None
     result: str | None = None
     error: str | None = None
+    retries: int = 0
+    max_retries: int = 2
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -37,6 +39,8 @@ class Task:
             "worker_id": self.worker_id,
             "result": self.result,
             "error": self.error,
+            "retries": self.retries,
+            "max_retries": self.max_retries,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
         }
@@ -52,6 +56,8 @@ class Task:
             worker_id=data.get("worker_id"),
             result=data.get("result"),
             error=data.get("error"),
+            retries=data.get("retries", 0),
+            max_retries=data.get("max_retries", 2),
             created_at=datetime.fromisoformat(data["created_at"]),
             updated_at=datetime.fromisoformat(data["updated_at"]),
         )
