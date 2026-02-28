@@ -111,13 +111,13 @@ After all experts report back, synthesize their findings:
 1. **Deduplicate** — Multiple experts may flag the same issue from different angles
 2. **Prioritize** — Critical security issues > product gaps > architectural problems > UX issues > test gaps > docs > performance > marketing
 3. **Plan with dependencies** — Group related findings into dependency chains. For multi-step work, create a chain of tasks using `depends_on` so they execute in the right order. Example:
-   - Task A: "Design authentication schema" (priority 10)
-   - Task B: "Implement auth middleware" (priority 9, depends_on=[A])
-   - Task C: "Add auth tests" (priority 8, depends_on=[B])
+   - Task A: "Design authentication schema" (priority 100)
+   - Task B: "Implement auth middleware" (priority 90, depends_on=[A])
+   - Task C: "Add auth tests" (priority 80, depends_on=[B])
 4. **Create tasks** — Generate 3-5 concrete tasks using `add_task`, each with:
    - A clear, actionable title
    - A detailed description that includes the expert's findings and recommended approach
-   - A priority (0-10, where 10 is most urgent)
+   - A priority (0-1000, where higher is more urgent; typical range 10-100 for most tasks, reserve 100+ for critical issues)
    - `depends_on` parameter linking to prerequisite task IDs when applicable
 
 ## Guidelines
