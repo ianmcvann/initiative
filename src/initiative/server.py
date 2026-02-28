@@ -39,6 +39,7 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
         max_retries: int = 2,
         depends_on: Optional[Sequence[int]] = None,
         tags: Optional[Sequence[str]] = None,
+        timeout_seconds: int = 0,
     ) -> str:
         """Add a new task to the Initiative queue.
 
@@ -49,6 +50,7 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
             max_retries: Maximum number of automatic retries on failure (default 2)
             depends_on: List of task IDs that must complete before this task can start
             tags: List of tags to categorize the task
+            timeout_seconds: Automatic failure timeout in seconds (0 means no timeout)
         """
         # Input validation
         if not title or not title.strip():
@@ -63,6 +65,8 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
             return json.dumps({"error": "priority must be between 0 and 1000"})
         if not 0 <= max_retries <= 100:
             return json.dumps({"error": "max_retries must be between 0 and 100"})
+        if timeout_seconds < 0:
+            return json.dumps({"error": "timeout_seconds must be non-negative"})
         deps = list(depends_on) if depends_on else None
         tag_list = list(tags) if tags else None
         if tag_list:
@@ -71,12 +75,12 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
             for t in tag_list:
                 if len(t) > 100:
                     return json.dumps({"error": f"tag must be 100 characters or fewer: {t[:20]}..."})
-        logger.info("add_task called: title=%r priority=%d depends_on=%s tags=%s", title, priority, deps, tag_list)
+        logger.info("add_task called: title=%r priority=%d depends_on=%s tags=%s timeout_seconds=%d", title, priority, deps, tag_list, timeout_seconds)
         try:
-            task_id = store.add_task(title, description, priority, max_retries=max_retries, depends_on=deps, tags=tag_list)
+            task_id = store.add_task(title, description, priority, max_retries=max_retries, depends_on=deps, tags=tag_list, timeout_seconds=timeout_seconds or None)
         except ValueError as e:
             return json.dumps({"error": str(e)})
-        return json.dumps({"task_id": task_id, "title": title, "status": "pending", "max_retries": max_retries, "depends_on": deps or [], "tags": tag_list or []})
+        return json.dumps({"task_id": task_id, "title": title, "status": "pending", "max_retries": max_retries, "depends_on": deps or [], "tags": tag_list or [], "timeout_seconds": timeout_seconds or None})
 
     @mcp.tool()
     async def get_next_task(worker_id: str = "") -> str:

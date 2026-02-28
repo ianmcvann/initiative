@@ -639,7 +639,7 @@ def test_recover_stale_tasks_ignores_pending(store):
 def test_schema_migration_applied(store):
     """Schema version table exists and has correct version."""
     row = store._conn.execute("SELECT MAX(version) as v FROM schema_version").fetchone()
-    assert row["v"] == 2
+    assert row["v"] == 3
 
 
 # --- cancel_task tests ---
@@ -986,3 +986,47 @@ def test_purge_with_failed_and_cancelled(store):
     assert store.get_task(t2) is None
     assert store.get_task(t3) is None
     assert store.get_task(t4) is None
+
+
+# --- timeout support tests ---
+
+
+def test_add_task_with_timeout(store):
+    """Create task with timeout_seconds, verify it is stored."""
+    task_id = store.add_task("Timed task", "desc", timeout_seconds=300)
+    task = store.get_task(task_id)
+    assert task.timeout_seconds == 300
+
+
+def test_add_task_no_timeout(store):
+    """Default behavior: timeout_seconds is None."""
+    task_id = store.add_task("No timeout", "desc")
+    task = store.get_task(task_id)
+    assert task.timeout_seconds is None
+
+
+def test_recover_stale_tasks_timeout(store):
+    """Task with short timeout that has been running too long is auto-failed."""
+    task_id = store.add_task("Timed out task", "desc", timeout_seconds=10, max_retries=0)
+    store.get_next_task()
+    # Manually backdate started_at to simulate a task that has been running too long
+    store._conn.execute(
+        "UPDATE tasks SET started_at = datetime('now', '-60 seconds') WHERE id = ?",
+        (task_id,),
+    )
+    store._conn.commit()
+    store.recover_stale_tasks(timeout_minutes=30)
+    task = store.get_task(task_id)
+    assert task.status == TaskStatus.FAILED
+    assert task.error == "Task timed out"
+
+
+def test_schema_migration_v3(store):
+    """Verify migration v3 applied (timeout_seconds column exists)."""
+    row = store._conn.execute("SELECT MAX(version) as v FROM schema_version").fetchone()
+    assert row["v"] == 3
+    # Also verify the column exists by querying it
+    row = store._conn.execute(
+        "SELECT timeout_seconds FROM tasks LIMIT 0"
+    ).fetchone()
+    # No error means the column exists

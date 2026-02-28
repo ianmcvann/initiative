@@ -11,7 +11,7 @@ from .models import Task, TaskStatus
 
 logger = logging.getLogger("initiative.database")
 
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 _MIGRATIONS: dict[int, str] = {
     1: """
@@ -52,6 +52,9 @@ CREATE INDEX IF NOT EXISTS idx_tasks_status_priority ON tasks(status, priority D
 CREATE INDEX IF NOT EXISTS idx_task_dependencies_task_id ON task_dependencies(task_id);
 CREATE INDEX IF NOT EXISTS idx_task_dependencies_depends_on ON task_dependencies(depends_on_id);
 CREATE INDEX IF NOT EXISTS idx_task_tags_task_id ON task_tags(task_id);
+""",
+    3: """
+ALTER TABLE tasks ADD COLUMN timeout_seconds INTEGER DEFAULT NULL;
 """,
 }
 
@@ -126,12 +129,13 @@ class TaskStore:
         max_retries: int = 2,
         depends_on: list[int] | None = None,
         tags: list[str] | None = None,
+        timeout_seconds: int | None = None,
         _commit: bool = True,
     ) -> int:
         now = datetime.now(timezone.utc).isoformat()
         cursor = self._conn.execute(
-            "INSERT INTO tasks (title, description, priority, max_retries, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (title, description, priority, max_retries, TaskStatus.PENDING, now, now),
+            "INSERT INTO tasks (title, description, priority, max_retries, timeout_seconds, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (title, description, priority, max_retries, timeout_seconds, TaskStatus.PENDING, now, now),
         )
         task_id = cursor.lastrowid
         if depends_on:
@@ -328,8 +332,23 @@ class TaskStore:
 
     def recover_stale_tasks(self, timeout_minutes: int = 30) -> int:
         """Reset tasks stuck in in_progress for longer than timeout_minutes back to pending.
-        Returns the number of tasks recovered."""
+        Also fails tasks that have exceeded their per-task timeout_seconds.
+        Returns the number of tasks recovered (not counting timed-out tasks)."""
         now = datetime.now(timezone.utc).isoformat()
+
+        # First, fail tasks that have exceeded their per-task timeout
+        timed_out_rows = self._conn.execute(
+            """SELECT id FROM tasks
+            WHERE status = ?
+            AND timeout_seconds IS NOT NULL
+            AND started_at IS NOT NULL
+            AND julianday('now') - julianday(started_at) > timeout_seconds / 86400.0""",
+            (TaskStatus.IN_PROGRESS,),
+        ).fetchall()
+        for row in timed_out_rows:
+            self.fail_task(row["id"], error="Task timed out")
+
+        # Then, recover stale tasks (generic timeout)
         cursor = self._conn.execute(
             """UPDATE tasks SET status = ?, started_at = NULL, updated_at = ?
             WHERE status = ? AND updated_at < datetime(?, ?)""",
@@ -339,6 +358,8 @@ class TaskStore:
         self._conn.commit()
         if count > 0:
             logger.info("Recovered %d stale tasks (timeout=%d min)", count, timeout_minutes)
+        if timed_out_rows:
+            logger.info("Failed %d timed-out tasks", len(timed_out_rows))
         return count
 
     def _build_filter_query(
@@ -606,6 +627,7 @@ class TaskStore:
                 error=row["error"],
                 retries=row["retries"],
                 max_retries=row["max_retries"],
+                timeout_seconds=row["timeout_seconds"],
                 blocked_by=deps_by_id[tid],
                 tags=tags_by_id[tid],
                 started_at=self._parse_optional_dt(row["started_at"]),

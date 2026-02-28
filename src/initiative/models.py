@@ -27,6 +27,7 @@ class Task:
     error: str | None = None
     retries: int = 0
     max_retries: int = 2
+    timeout_seconds: int | None = None
     blocked_by: list[int] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     started_at: datetime | None = None
@@ -46,6 +47,7 @@ class Task:
             "error": self.error,
             "retries": self.retries,
             "max_retries": self.max_retries,
+            "timeout_seconds": self.timeout_seconds,
             "blocked_by": self.blocked_by,
             "tags": self.tags,
             "started_at": self.started_at.isoformat() if self.started_at else None,
@@ -67,6 +69,7 @@ class Task:
             error=data.get("error"),
             retries=data.get("retries", 0),
             max_retries=data.get("max_retries", 2),
+            timeout_seconds=data.get("timeout_seconds"),
             blocked_by=data.get("blocked_by", []),
             tags=data.get("tags", []),
             started_at=datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None,
