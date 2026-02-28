@@ -263,6 +263,11 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
         err = _validate_task_id(task_id)
         if err:
             return json.dumps({"error": err, "task_id": task_id})
+        if not tag or not tag.strip():
+            return json.dumps({"error": "tag must not be empty", "task_id": task_id})
+        tag = tag.strip()
+        if len(tag) > 100:
+            return json.dumps({"error": "tag must be 100 characters or fewer", "task_id": task_id})
         logger.info("add_tag called: task_id=%d tag=%r", task_id, tag)
         task = store.get_task(task_id)
         if task is None:
@@ -411,8 +416,16 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
             title = st.get("title", "")
             desc = st.get("description", "")
             priority = st.get("priority", parent.priority)
-            if not title or not desc:
-                return json.dumps({"error": "Each subtask must have title and description"})
+            if not title or not title.strip():
+                return json.dumps({"error": "Each subtask must have a non-empty title"})
+            if len(title) > 1000:
+                return json.dumps({"error": "Subtask title must be 1000 characters or fewer"})
+            if not desc or not desc.strip():
+                return json.dumps({"error": "Each subtask must have a non-empty description"})
+            if len(desc) > 50000:
+                return json.dumps({"error": "Subtask description must be 50000 characters or fewer"})
+            if not isinstance(priority, (int, float)) or not 0 <= priority <= 1000:
+                return json.dumps({"error": "Subtask priority must be between 0 and 1000"})
             depends = [prev_id] if prev_id else None
             sub_id = store.add_task(title, desc, priority=priority, depends_on=depends)
             store.add_tag(sub_id, "subtask")

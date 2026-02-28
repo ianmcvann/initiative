@@ -363,7 +363,7 @@ class TaskStore:
             WHERE status = ? AND started_at IS NOT NULL AND completed_at IS NOT NULL""",
             (TaskStatus.COMPLETED,),
         ).fetchone()
-        avg_completion_time = round(avg_row["avg_seconds"], 2) if avg_row["avg_seconds"] else None
+        avg_completion_time = round(avg_row["avg_seconds"], 2) if avg_row["avg_seconds"] is not None else None
 
         # Tasks completed in last hour
         now = datetime.now(timezone.utc).isoformat()
