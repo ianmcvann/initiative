@@ -18,7 +18,7 @@ Quickly explore the project to understand:
 
 ### 2. Dispatch expert panel
 
-Launch the following specialist agents **in parallel** using the Agent tool. Each expert should explore the codebase independently and return a prioritized list of findings (issues, improvements, missing pieces).
+Launch the following specialist agents **in parallel** using the Agent tool. Each expert should explore the codebase independently and return a prioritized list of findings — not just problems, but also **new features to build, improvements to make, and opportunities to pursue**. The goal is forward momentum, not just bug-fixing.
 
 **For software projects, dispatch all 8 experts:**
 
@@ -73,14 +73,14 @@ Launch the following specialist agents **in parallel** using the Agent tool. Eac
 > Return a prioritized list of performance concerns.
 
 #### Product Management Expert
-> Evaluate the project from a product perspective. Look for:
-> - Missing features that users would expect
-> - Incomplete user workflows or dead ends
-> - Feature prioritization gaps (what should be built next for maximum user value?)
-> - Missing error messages, feedback, or status indicators
+> Evaluate the project from a product perspective. Think about both what's missing AND what should be built next:
+> - What new features would users love? What's the next logical capability to add?
+> - What could be improved to make existing features more powerful or delightful?
+> - Incomplete user workflows or dead ends that need finishing
+> - Feature prioritization: what should be built next for maximum user value?
 > - Gaps between the project's stated goals and what's actually implemented
 >
-> Return a prioritized list of product gaps with user impact assessment.
+> Return a prioritized list of feature ideas, product gaps, and improvements with user impact assessment.
 
 #### UX Expert
 > Assess the user experience of the project. Look for:
@@ -118,6 +118,7 @@ After all experts report back, synthesize their findings:
 
 ## Guidelines
 
+- **Build forward** — Mix of fixing problems AND building new features. At least half the generated tasks should be additive (new capabilities, new features, new integrations) rather than purely defensive (fixing bugs, closing gaps)
 - Be specific — "Add input validation to add_task title parameter" not "Improve security"
 - Be practical — suggest tasks that can be completed in a single focused session
 - Be diverse — spread tasks across different expert domains, not just one area
