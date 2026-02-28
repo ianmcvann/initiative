@@ -448,3 +448,171 @@ async def test_recover_stale_tasks_invalid_timeout(server):
     """recover_stale_tasks rejects timeout < 1."""
     data = await call_tool(server, "recover_stale_tasks", {"timeout_minutes": 0})
     assert "error" in data
+
+
+# --- cancel_task tool tests ---
+
+
+@pytest.mark.anyio
+async def test_cancel_task_pending(server):
+    """cancel_task cancels a pending task."""
+    add_data = await call_tool(server, "add_task", {"title": "Cancel me", "description": "d"})
+    task_id = add_data["task_id"]
+    data = await call_tool(server, "cancel_task", {"task_id": task_id})
+    assert data["status"] == "cancelled"
+    assert data["message"] == "Task has been cancelled"
+
+
+@pytest.mark.anyio
+async def test_cancel_task_in_progress(server):
+    """cancel_task cancels an in-progress task."""
+    add_data = await call_tool(server, "add_task", {"title": "Cancel me", "description": "d"})
+    task_id = add_data["task_id"]
+    await call_tool(server, "get_next_task")
+    data = await call_tool(server, "cancel_task", {"task_id": task_id})
+    assert data["status"] == "cancelled"
+
+
+@pytest.mark.anyio
+async def test_cancel_task_completed_error(server):
+    """cancel_task returns error for a completed task."""
+    add_data = await call_tool(server, "add_task", {"title": "Done", "description": "d"})
+    task_id = add_data["task_id"]
+    await call_tool(server, "get_next_task")
+    await call_tool(server, "complete_task", {"task_id": task_id})
+    data = await call_tool(server, "cancel_task", {"task_id": task_id})
+    assert "error" in data
+    assert "cannot cancel" in data["error"]
+
+
+@pytest.mark.anyio
+async def test_cancel_task_not_found(server):
+    """cancel_task returns error for nonexistent task."""
+    data = await call_tool(server, "cancel_task", {"task_id": 999})
+    assert data["error"] == "Task not found"
+
+
+@pytest.mark.anyio
+async def test_cancel_task_invalid_id(server):
+    """cancel_task rejects invalid task_id."""
+    data = await call_tool(server, "cancel_task", {"task_id": 0})
+    assert "error" in data
+
+
+@pytest.mark.anyio
+async def test_cancel_task_already_cancelled(server):
+    """cancel_task returns error for already cancelled task."""
+    add_data = await call_tool(server, "add_task", {"title": "Cancel me", "description": "d"})
+    task_id = add_data["task_id"]
+    await call_tool(server, "cancel_task", {"task_id": task_id})
+    data = await call_tool(server, "cancel_task", {"task_id": task_id})
+    assert "error" in data
+    assert "cannot cancel" in data["error"]
+
+
+@pytest.mark.anyio
+async def test_get_status_includes_cancelled(server):
+    """get_status includes cancelled count."""
+    await call_tool(server, "add_task", {"title": "T1", "description": "d"})
+    add_data = await call_tool(server, "add_task", {"title": "T2", "description": "d"})
+    await call_tool(server, "cancel_task", {"task_id": add_data["task_id"]})
+    data = await call_tool(server, "get_status")
+    assert data["cancelled"] == 1
+    assert data["pending"] == 1
+    assert data["total"] == 2
+
+
+# --- update_task tool tests ---
+
+
+@pytest.mark.anyio
+async def test_update_task_title(server):
+    """update_task updates the title."""
+    add_data = await call_tool(server, "add_task", {"title": "Old", "description": "d"})
+    task_id = add_data["task_id"]
+    data = await call_tool(server, "update_task", {"task_id": task_id, "title": "New"})
+    assert data["title"] == "New"
+    assert data["description"] == "d"
+
+
+@pytest.mark.anyio
+async def test_update_task_description(server):
+    """update_task updates the description."""
+    add_data = await call_tool(server, "add_task", {"title": "T", "description": "Old"})
+    task_id = add_data["task_id"]
+    data = await call_tool(server, "update_task", {"task_id": task_id, "description": "New"})
+    assert data["description"] == "New"
+    assert data["title"] == "T"
+
+
+@pytest.mark.anyio
+async def test_update_task_priority(server):
+    """update_task updates the priority."""
+    add_data = await call_tool(server, "add_task", {"title": "T", "description": "d", "priority": 1})
+    task_id = add_data["task_id"]
+    data = await call_tool(server, "update_task", {"task_id": task_id, "priority": 99})
+    assert data["priority"] == 99
+
+
+@pytest.mark.anyio
+async def test_update_task_not_pending(server):
+    """update_task returns error for non-pending task."""
+    add_data = await call_tool(server, "add_task", {"title": "T", "description": "d"})
+    task_id = add_data["task_id"]
+    await call_tool(server, "get_next_task")
+    data = await call_tool(server, "update_task", {"task_id": task_id, "title": "New"})
+    assert "error" in data
+    assert "only pending tasks" in data["error"]
+
+
+@pytest.mark.anyio
+async def test_update_task_not_found(server):
+    """update_task returns error for nonexistent task."""
+    data = await call_tool(server, "update_task", {"task_id": 999, "title": "New"})
+    assert data["error"] == "Task not found"
+
+
+@pytest.mark.anyio
+async def test_update_task_no_fields(server):
+    """update_task returns error when no fields provided."""
+    add_data = await call_tool(server, "add_task", {"title": "T", "description": "d"})
+    task_id = add_data["task_id"]
+    data = await call_tool(server, "update_task", {"task_id": task_id})
+    assert "error" in data
+    assert "At least one field" in data["error"]
+
+
+@pytest.mark.anyio
+async def test_update_task_empty_title(server):
+    """update_task rejects empty title."""
+    add_data = await call_tool(server, "add_task", {"title": "T", "description": "d"})
+    task_id = add_data["task_id"]
+    data = await call_tool(server, "update_task", {"task_id": task_id, "title": ""})
+    assert "error" in data
+
+
+@pytest.mark.anyio
+async def test_update_task_invalid_priority(server):
+    """update_task rejects out-of-range priority."""
+    add_data = await call_tool(server, "add_task", {"title": "T", "description": "d"})
+    task_id = add_data["task_id"]
+    data = await call_tool(server, "update_task", {"task_id": task_id, "priority": -1})
+    assert "error" in data
+
+
+@pytest.mark.anyio
+async def test_update_task_invalid_id(server):
+    """update_task rejects invalid task_id."""
+    data = await call_tool(server, "update_task", {"task_id": 0, "title": "New"})
+    assert "error" in data
+
+
+@pytest.mark.anyio
+async def test_list_tasks_cancelled_status(server):
+    """list_tasks can filter by cancelled status."""
+    await call_tool(server, "add_task", {"title": "T1", "description": "d"})
+    add_data = await call_tool(server, "add_task", {"title": "T2", "description": "d"})
+    await call_tool(server, "cancel_task", {"task_id": add_data["task_id"]})
+    data = await call_tool(server, "list_tasks", {"status": "cancelled"})
+    assert data["count"] == 1
+    assert data["tasks"][0]["title"] == "T2"

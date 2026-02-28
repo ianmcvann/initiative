@@ -1,0 +1,19 @@
+{
+  "name": "initiative",
+  "description": "Local marketplace for the Initiative autonomous task orchestration plugin",
+  "owner": {
+    "name": "Ian McVann"
+  },
+  "plugins": [
+    {
+      "name": "initiative",
+      "description": "Autonomous AI task orchestration — never-stopping background worker",
+      "version": "0.1.0",
+      "author": {
+        "name": "Ian McVann"
+      },
+      "source": "./plugins/initiative",
+      "category": "productivity"
+    }
+  ]
+}
