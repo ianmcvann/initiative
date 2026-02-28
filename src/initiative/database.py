@@ -53,6 +53,23 @@ class TaskStore:
         self._conn.executescript(_SCHEMA)
         logger.debug("Database connected: %s", db_path)
 
+    def close(self) -> None:
+        """Close the database connection."""
+        self._conn.close()
+        logger.debug("Database closed: %s", self._db_path)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+    def __del__(self):
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+
     def add_task(
         self,
         title: str,
@@ -202,7 +219,7 @@ class TaskStore:
         query += " ORDER BY t.priority DESC, t.created_at ASC"
 
         rows = self._conn.execute(query, params).fetchall()
-        return [self._row_to_task(row) for row in rows]
+        return self._batch_rows_to_tasks(rows)
 
     def get_status(self) -> dict:
         rows = self._conn.execute(
@@ -253,6 +270,7 @@ class TaskStore:
         return [row["tag"] for row in rows]
 
     def _row_to_task(self, row: sqlite3.Row) -> Task:
+        """Convert a single row to a Task (makes 2 extra queries for tags/deps)."""
         task_id = row["id"]
         return Task(
             id=task_id,
@@ -270,3 +288,52 @@ class TaskStore:
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )
+
+    def _batch_rows_to_tasks(self, rows: list[sqlite3.Row]) -> list[Task]:
+        """Convert multiple rows to Tasks using batch queries (3 queries total)."""
+        if not rows:
+            return []
+        task_ids = [row["id"] for row in rows]
+        placeholders = ",".join("?" * len(task_ids))
+
+        # Batch fetch all tags
+        tag_rows = self._conn.execute(
+            f"SELECT task_id, tag FROM task_tags WHERE task_id IN ({placeholders}) ORDER BY tag",
+            task_ids,
+        ).fetchall()
+        tags_by_id: dict[int, list[str]] = {tid: [] for tid in task_ids}
+        for tr in tag_rows:
+            tags_by_id[tr["task_id"]].append(tr["tag"])
+
+        # Batch fetch all uncompleted dependencies
+        dep_rows = self._conn.execute(
+            f"""SELECT d.task_id, d.depends_on_id FROM task_dependencies d
+            JOIN tasks dep ON dep.id = d.depends_on_id
+            WHERE d.task_id IN ({placeholders}) AND dep.status != ?""",
+            [*task_ids, str(TaskStatus.COMPLETED)],
+        ).fetchall()
+        deps_by_id: dict[int, list[int]] = {tid: [] for tid in task_ids}
+        for dr in dep_rows:
+            deps_by_id[dr["task_id"]].append(dr["depends_on_id"])
+
+        # Build Task objects using lookup dicts
+        tasks = []
+        for row in rows:
+            tid = row["id"]
+            tasks.append(Task(
+                id=tid,
+                title=row["title"],
+                description=row["description"],
+                status=TaskStatus(row["status"]),
+                priority=row["priority"],
+                worker_id=row["worker_id"],
+                result=row["result"],
+                error=row["error"],
+                retries=row["retries"],
+                max_retries=row["max_retries"],
+                blocked_by=deps_by_id[tid],
+                tags=tags_by_id[tid],
+                created_at=datetime.fromisoformat(row["created_at"]),
+                updated_at=datetime.fromisoformat(row["updated_at"]),
+            ))
+        return tasks

@@ -330,3 +330,24 @@ def test_foreign_keys_enabled(store):
             (9999, "orphan"),
         )
         store._conn.commit()
+
+
+def test_context_manager(tmp_path):
+    """TaskStore works as a context manager."""
+    db_path = tmp_path / "ctx.db"
+    with TaskStore(str(db_path)) as store:
+        task_id = store.add_task("Context task", "desc")
+        assert task_id == 1
+    # After closing, operations should fail
+    with pytest.raises(Exception):
+        store.add_task("Should fail", "desc")
+
+
+def test_close(tmp_path):
+    """TaskStore.close() closes the connection."""
+    db_path = tmp_path / "close.db"
+    store = TaskStore(str(db_path))
+    store.add_task("Before close", "desc")
+    store.close()
+    with pytest.raises(Exception):
+        store.add_task("After close", "desc")
