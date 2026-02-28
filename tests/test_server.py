@@ -616,3 +616,51 @@ async def test_list_tasks_cancelled_status(server):
     data = await call_tool(server, "list_tasks", {"status": "cancelled"})
     assert data["count"] == 1
     assert data["tasks"][0]["title"] == "T2"
+
+
+# --- decompose_task tool tests ---
+
+
+@pytest.mark.anyio
+async def test_decompose_task(server):
+    """decompose_task creates subtask chain."""
+    parent = await call_tool(server, "add_task", {"title": "Big task", "description": "d", "priority": 5})
+    data = await call_tool(server, "decompose_task", {
+        "task_id": parent["task_id"],
+        "subtasks": [
+            {"title": "Step 1", "description": "First"},
+            {"title": "Step 2", "description": "Second"},
+            {"title": "Step 3", "description": "Third"},
+        ],
+    })
+    assert data["count"] == 3
+    assert len(data["subtask_ids"]) == 3
+    # Parent should be cancelled
+    tasks = await call_tool(server, "list_tasks", {"status": "cancelled"})
+    assert any(t["id"] == parent["task_id"] for t in tasks["tasks"])
+    # Step 1 should be unblocked, step 2 blocked by step 1
+    step1 = await call_tool(server, "get_next_task")
+    assert step1["title"] == "Step 1"
+
+
+@pytest.mark.anyio
+async def test_decompose_task_not_pending(server):
+    """decompose_task rejects non-pending tasks."""
+    parent = await call_tool(server, "add_task", {"title": "T", "description": "d"})
+    await call_tool(server, "get_next_task")
+    data = await call_tool(server, "decompose_task", {
+        "task_id": parent["task_id"],
+        "subtasks": [{"title": "A", "description": "a"}, {"title": "B", "description": "b"}],
+    })
+    assert "error" in data
+
+
+@pytest.mark.anyio
+async def test_decompose_task_too_few_subtasks(server):
+    """decompose_task requires at least 2 subtasks."""
+    parent = await call_tool(server, "add_task", {"title": "T", "description": "d"})
+    data = await call_tool(server, "decompose_task", {
+        "task_id": parent["task_id"],
+        "subtasks": [{"title": "A", "description": "a"}],
+    })
+    assert "error" in data

@@ -376,6 +376,58 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
         count = store.recover_stale_tasks(timeout_minutes)
         return json.dumps({"recovered": count, "timeout_minutes": timeout_minutes})
 
+    @mcp.tool()
+    async def decompose_task(
+        task_id: int,
+        subtasks: Sequence[dict],
+    ) -> str:
+        """Decompose a task into ordered subtasks with dependencies.
+
+        The parent task is tagged as 'epic'. Each subtask depends on the previous one,
+        creating an execution chain. The parent task is cancelled since subtasks replace it.
+
+        Args:
+            task_id: ID of the parent task to decompose
+            subtasks: List of {title, description, priority?} dicts in execution order
+        """
+        err = _validate_task_id(task_id)
+        if err:
+            return json.dumps({"error": err, "task_id": task_id})
+        parent = store.get_task(task_id)
+        if parent is None:
+            return json.dumps({"error": "Task not found", "task_id": task_id})
+        if parent.status != TaskStatus.PENDING:
+            return json.dumps({"error": f"Task is {parent.status}, only pending tasks can be decomposed", "task_id": task_id})
+        if not subtasks or len(subtasks) < 2:
+            return json.dumps({"error": "At least 2 subtasks required for decomposition"})
+        if len(subtasks) > 20:
+            return json.dumps({"error": "Maximum 20 subtasks allowed"})
+
+        logger.info("decompose_task called: task_id=%d subtasks=%d", task_id, len(subtasks))
+        store.add_tag(task_id, "epic")
+        created_ids = []
+        prev_id = None
+        for st in subtasks:
+            title = st.get("title", "")
+            desc = st.get("description", "")
+            priority = st.get("priority", parent.priority)
+            if not title or not desc:
+                return json.dumps({"error": "Each subtask must have title and description"})
+            depends = [prev_id] if prev_id else None
+            sub_id = store.add_task(title, desc, priority=priority, depends_on=depends)
+            store.add_tag(sub_id, "subtask")
+            store.add_tag(sub_id, f"epic:{task_id}")
+            created_ids.append(sub_id)
+            prev_id = sub_id
+
+        store.cancel_task(task_id)
+        return json.dumps({
+            "parent_id": task_id,
+            "subtask_ids": created_ids,
+            "count": len(created_ids),
+            "message": f"Decomposed into {len(created_ids)} subtasks",
+        })
+
     return mcp
 
 

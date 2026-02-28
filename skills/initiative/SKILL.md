@@ -40,7 +40,7 @@ There are no pending tasks. Convene an expert panel to thoroughly analyze the pr
    - **Product Management Expert** — missing features, incomplete workflows, user value gaps
    - **UX Expert** — confusing interfaces, poor feedback, accessibility
    - **Marketing Expert** — positioning, discoverability, distribution
-3. Synthesize their findings: deduplicate, prioritize, and generate 3-5 concrete tasks using `add_task` with appropriate priorities and tags. Ensure a mix of **new features** and **improvements** — don't just fix problems, build forward
+3. Synthesize their findings: deduplicate, prioritize, and generate 3-5 concrete tasks using `add_task` with appropriate priorities and `depends_on` to create execution order. Ensure a mix of **new features** and **improvements** — don't just fix problems, build forward. For multi-step work, chain tasks with dependencies so they execute in the right order
 
 After adding new tasks, go back to step 1.
 
