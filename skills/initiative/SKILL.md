@@ -26,14 +26,21 @@ You have been given a task. Work on it using all tools available to you:
 
 After completing or failing the task, go back to step 1.
 
-### 3. Analyze the project
+### 3. Analyze the project (Expert Panel)
 
-There are no pending tasks. Use your judgment to figure out what the project needs next:
+There are no pending tasks. Convene an expert panel to thoroughly analyze the project from multiple perspectives:
 
-1. Explore the project structure, files, documentation, issues, and any other signals
-2. Think about what would have the highest impact right now
-3. Consider: What's missing? What's broken? What could be better? What's the next logical step?
-4. Generate 3-5 new tasks using `add_task` for each one, with appropriate priorities
+1. Quickly explore the project to understand its type, goals, and current state
+2. Dispatch 8 specialist agents **in parallel** using the Agent tool, each examining the project from their domain:
+   - **Security Expert** — vulnerabilities, input validation, exposed secrets
+   - **Architecture Expert** — code structure, coupling, scalability
+   - **Testing Expert** — coverage gaps, missing edge cases
+   - **Documentation Expert** — missing docs, outdated content
+   - **Performance Expert** — N+1 queries, unnecessary computation, memory leaks
+   - **Product Management Expert** — missing features, incomplete workflows, user value gaps
+   - **UX Expert** — confusing interfaces, poor feedback, accessibility
+   - **Marketing Expert** — positioning, discoverability, distribution
+3. Synthesize their findings: deduplicate, prioritize, and generate 3-5 concrete tasks using `add_task` with appropriate priorities and tags
 
 After adding new tasks, go back to step 1.
 
