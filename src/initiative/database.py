@@ -26,6 +26,14 @@ CREATE TABLE IF NOT EXISTS tasks (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS task_dependencies (
+    task_id INTEGER NOT NULL,
+    depends_on_id INTEGER NOT NULL,
+    PRIMARY KEY (task_id, depends_on_id),
+    FOREIGN KEY (task_id) REFERENCES tasks(id),
+    FOREIGN KEY (depends_on_id) REFERENCES tasks(id)
+);
 """
 
 
@@ -38,15 +46,28 @@ class TaskStore:
         self._conn.executescript(_SCHEMA)
         logger.debug("Database connected: %s", db_path)
 
-    def add_task(self, title: str, description: str, priority: int = 0, max_retries: int = 2) -> int:
+    def add_task(
+        self,
+        title: str,
+        description: str,
+        priority: int = 0,
+        max_retries: int = 2,
+        depends_on: list[int] | None = None,
+    ) -> int:
         now = datetime.now(timezone.utc).isoformat()
         cursor = self._conn.execute(
             "INSERT INTO tasks (title, description, priority, max_retries, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (title, description, priority, max_retries, TaskStatus.PENDING, now, now),
         )
-        self._conn.commit()
         task_id = cursor.lastrowid
-        logger.info("Task added: id=%d title=%r", task_id, title)
+        if depends_on:
+            for dep_id in depends_on:
+                self._conn.execute(
+                    "INSERT INTO task_dependencies (task_id, depends_on_id) VALUES (?, ?)",
+                    (task_id, dep_id),
+                )
+        self._conn.commit()
+        logger.info("Task added: id=%d title=%r depends_on=%s", task_id, title, depends_on)
         return task_id
 
     def get_task(self, task_id: int) -> Task | None:
@@ -57,8 +78,15 @@ class TaskStore:
 
     def get_next_task(self) -> Task | None:
         row = self._conn.execute(
-            "SELECT * FROM tasks WHERE status = ? ORDER BY priority DESC, created_at ASC LIMIT 1",
-            (TaskStatus.PENDING,),
+            """SELECT t.* FROM tasks t
+            WHERE t.status = ?
+            AND NOT EXISTS (
+                SELECT 1 FROM task_dependencies d
+                JOIN tasks dep ON dep.id = d.depends_on_id
+                WHERE d.task_id = t.id AND dep.status != ?
+            )
+            ORDER BY t.priority DESC, t.created_at ASC LIMIT 1""",
+            (TaskStatus.PENDING, TaskStatus.COMPLETED),
         ).fetchone()
         if row is None:
             logger.debug("No pending tasks available")
@@ -146,9 +174,20 @@ class TaskStore:
             **counts,
         }
 
+    def get_blocked_by(self, task_id: int) -> list[int]:
+        """Return IDs of uncompleted tasks that this task depends on."""
+        rows = self._conn.execute(
+            """SELECT d.depends_on_id FROM task_dependencies d
+            JOIN tasks dep ON dep.id = d.depends_on_id
+            WHERE d.task_id = ? AND dep.status != ?""",
+            (task_id, TaskStatus.COMPLETED),
+        ).fetchall()
+        return [row["depends_on_id"] for row in rows]
+
     def _row_to_task(self, row: sqlite3.Row) -> Task:
+        task_id = row["id"]
         return Task(
-            id=row["id"],
+            id=task_id,
             title=row["title"],
             description=row["description"],
             status=TaskStatus(row["status"]),
@@ -158,6 +197,7 @@ class TaskStore:
             error=row["error"],
             retries=row["retries"],
             max_retries=row["max_retries"],
+            blocked_by=self.get_blocked_by(task_id),
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )

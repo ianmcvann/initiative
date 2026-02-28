@@ -149,3 +149,34 @@ async def test_auto_retry_full_cycle(server):
     data = await call_tool(server, "fail_task", {"task_id": task_id, "error": "Error 2"})
     assert data["status"] == "failed"
     assert "permanently failed" in data["message"]
+
+
+@pytest.mark.anyio
+async def test_add_task_with_depends_on(server):
+    """add_task accepts depends_on parameter."""
+    dep = await call_tool(server, "add_task", {"title": "Dep", "description": "d"})
+    data = await call_tool(server, "add_task", {"title": "Blocked", "description": "d", "depends_on": [dep["task_id"]]})
+    assert data["depends_on"] == [dep["task_id"]]
+
+
+@pytest.mark.anyio
+async def test_get_next_task_skips_blocked(server):
+    """get_next_task skips tasks with uncompleted dependencies."""
+    dep = await call_tool(server, "add_task", {"title": "Dep", "description": "d", "priority": 1})
+    await call_tool(server, "add_task", {"title": "Blocked", "description": "d", "priority": 10, "depends_on": [dep["task_id"]]})
+    data = await call_tool(server, "get_next_task")
+    assert data["title"] == "Dep"
+
+
+@pytest.mark.anyio
+async def test_blocked_task_available_after_dep_completes(server):
+    """After completing a dependency, the blocked task becomes available."""
+    dep = await call_tool(server, "add_task", {"title": "Dep", "description": "d"})
+    await call_tool(server, "add_task", {"title": "Blocked", "description": "d", "depends_on": [dep["task_id"]]})
+    # Complete the dependency
+    await call_tool(server, "get_next_task")
+    await call_tool(server, "complete_task", {"task_id": dep["task_id"]})
+    # Now blocked task should be available
+    data = await call_tool(server, "get_next_task")
+    assert data["title"] == "Blocked"
+    assert data["blocked_by"] == []

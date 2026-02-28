@@ -14,6 +14,7 @@ def test_task_creation_defaults():
     assert task.error is None
     assert task.retries == 0
     assert task.max_retries == 2
+    assert task.blocked_by == []
     assert isinstance(task.created_at, datetime)
 
 
@@ -39,6 +40,13 @@ def test_task_to_dict():
     assert d["status"] == "pending"
     assert d["retries"] == 0
     assert d["max_retries"] == 2
+    assert d["blocked_by"] == []
+
+
+def test_task_to_dict_with_blocked_by():
+    task = Task(id=3, title="Blocked", description="desc", blocked_by=[1, 2])
+    d = task.to_dict()
+    assert d["blocked_by"] == [1, 2]
 
 
 def test_task_to_dict_with_retries():
@@ -65,9 +73,10 @@ def test_task_from_dict():
     assert task.id == 1
     assert task.status == TaskStatus.IN_PROGRESS
     assert task.worker_id == "agent-1"
-    # Should use defaults when retries/max_retries are absent
+    # Should use defaults when retries/max_retries/blocked_by are absent
     assert task.retries == 0
     assert task.max_retries == 2
+    assert task.blocked_by == []
 
 
 def test_task_from_dict_with_retries():

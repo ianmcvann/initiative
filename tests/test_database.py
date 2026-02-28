@@ -155,3 +155,53 @@ def test_add_task_custom_max_retries(store):
     task = store.get_task(task_id)
     assert task.max_retries == 5
     assert task.retries == 0
+
+
+def test_add_task_with_dependencies(store):
+    """Tasks can be created with dependencies on other tasks."""
+    dep_id = store.add_task("Dependency", "must finish first")
+    task_id = store.add_task("Blocked task", "desc", depends_on=[dep_id])
+    task = store.get_task(task_id)
+    assert task.blocked_by == [dep_id]
+
+
+def test_get_next_task_skips_blocked(store):
+    """get_next_task does not return tasks with uncompleted dependencies."""
+    dep_id = store.add_task("Dependency", "desc", priority=1)
+    store.add_task("Blocked", "desc", priority=10, depends_on=[dep_id])
+    # Even though blocked task has higher priority, dependency is not complete
+    task = store.get_next_task()
+    assert task.title == "Dependency"
+
+
+def test_get_next_task_returns_unblocked_after_dep_completes(store):
+    """After a dependency completes, the blocked task becomes available."""
+    dep_id = store.add_task("Dependency", "desc")
+    blocked_id = store.add_task("Blocked", "desc", depends_on=[dep_id])
+    # Complete the dependency
+    store.get_next_task()  # pulls dependency
+    store.complete_task(dep_id)
+    # Now the blocked task should be available
+    task = store.get_next_task()
+    assert task.id == blocked_id
+    assert task.title == "Blocked"
+    assert task.blocked_by == []
+
+
+def test_blocked_by_shows_only_uncompleted_deps(store):
+    """blocked_by only shows uncompleted dependency IDs."""
+    dep1_id = store.add_task("Dep 1", "desc")
+    dep2_id = store.add_task("Dep 2", "desc")
+    task_id = store.add_task("Blocked", "desc", depends_on=[dep1_id, dep2_id])
+    # Complete one dependency
+    store.get_next_task()  # pulls dep1
+    store.complete_task(dep1_id)
+    task = store.get_task(task_id)
+    assert task.blocked_by == [dep2_id]
+
+
+def test_task_with_no_dependencies_has_empty_blocked_by(store):
+    """A task created without depends_on has empty blocked_by."""
+    task_id = store.add_task("Simple", "desc")
+    task = store.get_task(task_id)
+    assert task.blocked_by == []

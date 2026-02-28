@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Optional
+from typing import Optional, Sequence
 
 from fastmcp import FastMCP
 
@@ -19,7 +19,13 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
     store = TaskStore(db_path)
 
     @mcp.tool()
-    async def add_task(title: str, description: str, priority: int = 0, max_retries: int = 2) -> str:
+    async def add_task(
+        title: str,
+        description: str,
+        priority: int = 0,
+        max_retries: int = 2,
+        depends_on: Optional[Sequence[int]] = None,
+    ) -> str:
         """Add a new task to the Initiative queue.
 
         Args:
@@ -27,10 +33,12 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
             description: Detailed description of what needs to be done
             priority: Higher number = higher priority (default 0)
             max_retries: Maximum number of automatic retries on failure (default 2)
+            depends_on: List of task IDs that must complete before this task can start
         """
-        logger.info("add_task called: title=%r priority=%d max_retries=%d", title, priority, max_retries)
-        task_id = store.add_task(title, description, priority, max_retries=max_retries)
-        return json.dumps({"task_id": task_id, "title": title, "status": "pending", "max_retries": max_retries})
+        deps = list(depends_on) if depends_on else None
+        logger.info("add_task called: title=%r priority=%d depends_on=%s", title, priority, deps)
+        task_id = store.add_task(title, description, priority, max_retries=max_retries, depends_on=deps)
+        return json.dumps({"task_id": task_id, "title": title, "status": "pending", "max_retries": max_retries, "depends_on": deps or []})
 
     @mcp.tool()
     async def get_next_task() -> str:

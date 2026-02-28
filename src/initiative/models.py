@@ -26,6 +26,7 @@ class Task:
     error: str | None = None
     retries: int = 0
     max_retries: int = 2
+    blocked_by: list[int] = field(default_factory=list)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -41,6 +42,7 @@ class Task:
             "error": self.error,
             "retries": self.retries,
             "max_retries": self.max_retries,
+            "blocked_by": self.blocked_by,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
         }
@@ -58,6 +60,7 @@ class Task:
             error=data.get("error"),
             retries=data.get("retries", 0),
             max_retries=data.get("max_retries", 2),
+            blocked_by=data.get("blocked_by", []),
             created_at=datetime.fromisoformat(data["created_at"]),
             updated_at=datetime.fromisoformat(data["updated_at"]),
         )
