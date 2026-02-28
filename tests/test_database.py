@@ -737,6 +737,46 @@ def test_update_task_updates_timestamp(store):
 # --- get_status with cancelled count ---
 
 
+def test_get_status_pending_ready_and_blocked(store):
+    """get_status reports pending_ready and pending_blocked counts correctly."""
+    # Create a dependency chain: task B depends on task A
+    a_id = store.add_task("Task A", "desc")
+    b_id = store.add_task("Task B", "desc", depends_on=[a_id])
+    # Add a third task with no dependencies
+    c_id = store.add_task("Task C", "desc")
+
+    status = store.get_status()
+    assert status["pending"] == 3
+    # A and C are ready (no uncompleted deps), B is blocked on A
+    assert status["pending_ready"] == 2
+    assert status["pending_blocked"] == 1
+
+    # Complete task A — B should become ready
+    store.get_next_task()  # picks up A or C (highest priority / oldest)
+    store.complete_task(a_id)
+    status = store.get_status()
+    # Now B and C are pending (C is still pending, A is completed)
+    # But we picked up one task via get_next_task — check which one
+    # get_next_task picks the highest priority ready task; A and C are both ready,
+    # same priority, so it picks the oldest (A). After completing A:
+    #   pending: B, C  (B is now unblocked since A is completed)
+    assert status["pending"] == 2
+    assert status["pending_ready"] == 2
+    assert status["pending_blocked"] == 0
+
+
+def test_get_status_all_ready(store):
+    """When no tasks have dependencies, all pending tasks are ready."""
+    store.add_task("Task 1", "desc")
+    store.add_task("Task 2", "desc")
+    store.add_task("Task 3", "desc")
+
+    status = store.get_status()
+    assert status["pending"] == 3
+    assert status["pending_ready"] == 3
+    assert status["pending_blocked"] == 0
+
+
 def test_get_status_includes_cancelled(store):
     """get_status includes the cancelled count."""
     store.add_task("Task 1", "desc")
