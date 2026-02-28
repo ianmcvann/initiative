@@ -204,6 +204,58 @@ class TaskStore:
             logger.info("Task permanently failed: id=%d", task_id)
         return self.get_task(task_id)
 
+    def cancel_task(self, task_id: int) -> bool:
+        """Cancel a pending or in_progress task. Returns True on success, False if task not found or already completed/failed/cancelled."""
+        task = self.get_task(task_id)
+        if task is None:
+            logger.warning("cancel_task: task %d not found", task_id)
+            return False
+        if task.status not in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS):
+            logger.warning("cancel_task: task %d is %s, cannot cancel", task_id, task.status)
+            return False
+        now = datetime.now(timezone.utc).isoformat()
+        self._conn.execute(
+            "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?",
+            (TaskStatus.CANCELLED, now, task_id),
+        )
+        self._conn.commit()
+        logger.info("Task cancelled: id=%d", task_id)
+        return True
+
+    def update_task(self, task_id: int, title: str | None = None, description: str | None = None, priority: int | None = None) -> Task | None:
+        """Update specified fields on a pending task. Returns the updated task or None if not found/not pending."""
+        task = self.get_task(task_id)
+        if task is None:
+            logger.warning("update_task: task %d not found", task_id)
+            return None
+        if task.status != TaskStatus.PENDING:
+            logger.warning("update_task: task %d is %s, not pending", task_id, task.status)
+            return None
+        updates: list[str] = []
+        params: list = []
+        if title is not None:
+            updates.append("title = ?")
+            params.append(title)
+        if description is not None:
+            updates.append("description = ?")
+            params.append(description)
+        if priority is not None:
+            updates.append("priority = ?")
+            params.append(priority)
+        if not updates:
+            return task
+        now = datetime.now(timezone.utc).isoformat()
+        updates.append("updated_at = ?")
+        params.append(now)
+        params.append(task_id)
+        self._conn.execute(
+            f"UPDATE tasks SET {', '.join(updates)} WHERE id = ?",
+            params,
+        )
+        self._conn.commit()
+        logger.info("Task updated: id=%d fields=%s", task_id, [u.split(" =")[0] for u in updates[:-1]])
+        return self.get_task(task_id)
+
     def retry_task(self, task_id: int) -> Task | None:
         """Manually retry a failed task by resetting its status to pending."""
         task = self.get_task(task_id)

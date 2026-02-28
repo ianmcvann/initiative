@@ -141,6 +141,84 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
         })
 
     @mcp.tool()
+    async def cancel_task(task_id: int) -> str:
+        """Cancel a pending or in-progress task.
+
+        Args:
+            task_id: ID of the task to cancel
+        """
+        err = _validate_task_id(task_id)
+        if err:
+            return json.dumps({"error": err, "task_id": task_id})
+        logger.info("cancel_task called: task_id=%d", task_id)
+        current = store.get_task(task_id)
+        if current is None:
+            return json.dumps({"error": "Task not found", "task_id": task_id})
+        if current.status not in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS):
+            return json.dumps({
+                "error": f"Task is {current.status}, cannot cancel",
+                "task_id": task_id,
+                "status": str(current.status),
+            })
+        success = store.cancel_task(task_id)
+        if not success:
+            return json.dumps({"error": "Failed to cancel task", "task_id": task_id})
+        return json.dumps({
+            "task_id": task_id,
+            "status": "cancelled",
+            "message": "Task has been cancelled",
+        })
+
+    @mcp.tool()
+    async def update_task(
+        task_id: int,
+        title: Optional[str] = None,
+        description: Optional[str] = None,
+        priority: Optional[int] = None,
+    ) -> str:
+        """Update a pending task's title, description, and/or priority.
+
+        Args:
+            task_id: ID of the task to update
+            title: New title (optional)
+            description: New description (optional)
+            priority: New priority (optional)
+        """
+        err = _validate_task_id(task_id)
+        if err:
+            return json.dumps({"error": err, "task_id": task_id})
+        # Validate provided fields
+        if title is not None:
+            if not title.strip():
+                return json.dumps({"error": "title must not be empty"})
+            if len(title) > 1000:
+                return json.dumps({"error": "title must be 1000 characters or fewer"})
+        if description is not None:
+            if not description.strip():
+                return json.dumps({"error": "description must not be empty"})
+            if len(description) > 50000:
+                return json.dumps({"error": "description must be 50000 characters or fewer"})
+        if priority is not None:
+            if not 0 <= priority <= 1000:
+                return json.dumps({"error": "priority must be between 0 and 1000"})
+        if title is None and description is None and priority is None:
+            return json.dumps({"error": "At least one field (title, description, priority) must be provided"})
+        logger.info("update_task called: task_id=%d", task_id)
+        current = store.get_task(task_id)
+        if current is None:
+            return json.dumps({"error": "Task not found", "task_id": task_id})
+        if current.status != TaskStatus.PENDING:
+            return json.dumps({
+                "error": f"Task is {current.status}, only pending tasks can be updated",
+                "task_id": task_id,
+                "status": str(current.status),
+            })
+        task = store.update_task(task_id, title=title, description=description, priority=priority)
+        if task is None:
+            return json.dumps({"error": "Failed to update task", "task_id": task_id})
+        return json.dumps(task.to_dict())
+
+    @mcp.tool()
     async def retry_task(task_id: int) -> str:
         """Manually retry a failed task by resetting it to pending status.
 

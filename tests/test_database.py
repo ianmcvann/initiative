@@ -79,6 +79,7 @@ def test_get_status(store):
     assert status["in_progress"] == 1
     assert status["completed"] == 0
     assert status["failed"] == 0
+    assert status["cancelled"] == 0
 
 
 def test_auto_retry_on_fail(store):
@@ -511,3 +512,161 @@ def test_retry_task_resets_completed_at(store):
     assert task.completed_at is None
     assert task.started_at is None
     assert task.status == TaskStatus.PENDING
+
+
+# --- cancel_task tests ---
+
+
+def test_cancel_pending_task(store):
+    """cancel_task cancels a pending task."""
+    task_id = store.add_task("Cancel me", "desc")
+    assert store.cancel_task(task_id) is True
+    task = store.get_task(task_id)
+    assert task.status == TaskStatus.CANCELLED
+
+
+def test_cancel_in_progress_task(store):
+    """cancel_task cancels an in_progress task."""
+    task_id = store.add_task("Cancel me", "desc")
+    store.get_next_task()
+    assert store.cancel_task(task_id) is True
+    task = store.get_task(task_id)
+    assert task.status == TaskStatus.CANCELLED
+
+
+def test_cancel_completed_task_returns_false(store):
+    """cancel_task returns False for a completed task."""
+    task_id = store.add_task("Task", "desc")
+    store.get_next_task()
+    store.complete_task(task_id)
+    assert store.cancel_task(task_id) is False
+    task = store.get_task(task_id)
+    assert task.status == TaskStatus.COMPLETED
+
+
+def test_cancel_failed_task_returns_false(store):
+    """cancel_task returns False for a failed task."""
+    task_id = store.add_task("Task", "desc", max_retries=0)
+    store.get_next_task()
+    store.fail_task(task_id, error="broke")
+    assert store.cancel_task(task_id) is False
+    task = store.get_task(task_id)
+    assert task.status == TaskStatus.FAILED
+
+
+def test_cancel_already_cancelled_returns_false(store):
+    """cancel_task returns False for an already cancelled task."""
+    task_id = store.add_task("Task", "desc")
+    assert store.cancel_task(task_id) is True
+    assert store.cancel_task(task_id) is False
+
+
+def test_cancel_nonexistent_task_returns_false(store):
+    """cancel_task returns False for a nonexistent task."""
+    assert store.cancel_task(9999) is False
+
+
+def test_cancelled_task_not_picked_up(store):
+    """get_next_task does not return cancelled tasks."""
+    task_id = store.add_task("Cancel me", "desc", priority=10)
+    store.add_task("Pick me", "desc", priority=1)
+    store.cancel_task(task_id)
+    task = store.get_next_task()
+    assert task.title == "Pick me"
+
+
+# --- update_task tests ---
+
+
+def test_update_task_title(store):
+    """update_task updates the title of a pending task."""
+    task_id = store.add_task("Old title", "desc")
+    task = store.update_task(task_id, title="New title")
+    assert task is not None
+    assert task.title == "New title"
+    assert task.description == "desc"
+
+
+def test_update_task_description(store):
+    """update_task updates the description of a pending task."""
+    task_id = store.add_task("Title", "Old desc")
+    task = store.update_task(task_id, description="New desc")
+    assert task is not None
+    assert task.description == "New desc"
+    assert task.title == "Title"
+
+
+def test_update_task_priority(store):
+    """update_task updates the priority of a pending task."""
+    task_id = store.add_task("Title", "desc", priority=1)
+    task = store.update_task(task_id, priority=99)
+    assert task is not None
+    assert task.priority == 99
+
+
+def test_update_task_multiple_fields(store):
+    """update_task can update multiple fields at once."""
+    task_id = store.add_task("Old", "Old desc", priority=1)
+    task = store.update_task(task_id, title="New", description="New desc", priority=50)
+    assert task is not None
+    assert task.title == "New"
+    assert task.description == "New desc"
+    assert task.priority == 50
+
+
+def test_update_task_no_fields_returns_unchanged(store):
+    """update_task with no fields returns the task unchanged."""
+    task_id = store.add_task("Title", "desc", priority=5)
+    task = store.update_task(task_id)
+    assert task is not None
+    assert task.title == "Title"
+    assert task.priority == 5
+
+
+def test_update_task_nonexistent_returns_none(store):
+    """update_task returns None for a nonexistent task."""
+    assert store.update_task(9999, title="New") is None
+
+
+def test_update_task_in_progress_returns_none(store):
+    """update_task returns None for an in_progress task."""
+    task_id = store.add_task("Title", "desc")
+    store.get_next_task()
+    assert store.update_task(task_id, title="New") is None
+
+
+def test_update_task_completed_returns_none(store):
+    """update_task returns None for a completed task."""
+    task_id = store.add_task("Title", "desc")
+    store.get_next_task()
+    store.complete_task(task_id)
+    assert store.update_task(task_id, title="New") is None
+
+
+def test_update_task_cancelled_returns_none(store):
+    """update_task returns None for a cancelled task."""
+    task_id = store.add_task("Title", "desc")
+    store.cancel_task(task_id)
+    assert store.update_task(task_id, title="New") is None
+
+
+def test_update_task_updates_timestamp(store):
+    """update_task updates the updated_at timestamp."""
+    task_id = store.add_task("Title", "desc")
+    task_before = store.get_task(task_id)
+    task_after = store.update_task(task_id, title="New")
+    assert task_after.updated_at >= task_before.updated_at
+
+
+# --- get_status with cancelled count ---
+
+
+def test_get_status_includes_cancelled(store):
+    """get_status includes the cancelled count."""
+    store.add_task("Task 1", "desc")
+    task_id = store.add_task("Task 2", "desc")
+    store.cancel_task(task_id)
+    status = store.get_status()
+    assert status["cancelled"] == 1
+    assert status["pending"] == 1
+    assert status["total"] == 2
