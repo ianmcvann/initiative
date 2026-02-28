@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     error TEXT,
     retries INTEGER NOT NULL DEFAULT 0,
     max_retries INTEGER NOT NULL DEFAULT 2,
+    started_at TEXT,
+    completed_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -142,20 +144,21 @@ class TaskStore:
             return None
         now = datetime.now(timezone.utc).isoformat()
         self._conn.execute(
-            "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?",
-            (TaskStatus.IN_PROGRESS, now, row["id"]),
+            "UPDATE tasks SET status = ?, started_at = ?, updated_at = ? WHERE id = ?",
+            (TaskStatus.IN_PROGRESS, now, now, row["id"]),
         )
         self._conn.commit()
         task = self._row_to_task(row)
         task.status = TaskStatus.IN_PROGRESS
+        task.started_at = datetime.fromisoformat(now)
         logger.info("Task started: id=%d title=%r", task.id, task.title)
         return task
 
     def complete_task(self, task_id: int, result: str = "") -> None:
         now = datetime.now(timezone.utc).isoformat()
         self._conn.execute(
-            "UPDATE tasks SET status = ?, result = ?, updated_at = ? WHERE id = ?",
-            (TaskStatus.COMPLETED, result, now, task_id),
+            "UPDATE tasks SET status = ?, result = ?, completed_at = ?, updated_at = ? WHERE id = ?",
+            (TaskStatus.COMPLETED, result, now, now, task_id),
         )
         self._conn.commit()
         logger.info("Task completed: id=%d", task_id)
@@ -176,8 +179,8 @@ class TaskStore:
         else:
             # Max retries exceeded: mark as permanently failed
             self._conn.execute(
-                "UPDATE tasks SET status = ?, error = ?, updated_at = ? WHERE id = ?",
-                (TaskStatus.FAILED, error, now, task_id),
+                "UPDATE tasks SET status = ?, error = ?, completed_at = ?, updated_at = ? WHERE id = ?",
+                (TaskStatus.FAILED, error, now, now, task_id),
             )
             self._conn.commit()
             logger.info("Task permanently failed: id=%d", task_id)
@@ -228,9 +231,43 @@ class TaskStore:
         counts = {str(s): 0 for s in TaskStatus}
         for row in rows:
             counts[row["status"]] = row["count"]
+
+        # Average completion time for completed tasks
+        avg_row = self._conn.execute(
+            """SELECT AVG(
+                julianday(completed_at) - julianday(started_at)
+            ) * 86400 as avg_seconds
+            FROM tasks
+            WHERE status = ? AND started_at IS NOT NULL AND completed_at IS NOT NULL""",
+            (TaskStatus.COMPLETED,),
+        ).fetchone()
+        avg_completion_time = round(avg_row["avg_seconds"], 2) if avg_row["avg_seconds"] else None
+
+        # Tasks completed in last hour
+        now = datetime.now(timezone.utc).isoformat()
+        hour_ago_row = self._conn.execute(
+            """SELECT COUNT(*) as count FROM tasks
+            WHERE status = ? AND completed_at > datetime(?, '-1 hour')""",
+            (TaskStatus.COMPLETED, now),
+        ).fetchone()
+        tasks_completed_last_hour = hour_ago_row["count"]
+
+        # Oldest pending task age
+        oldest_row = self._conn.execute(
+            """SELECT MIN(created_at) as oldest FROM tasks WHERE status = ?""",
+            (TaskStatus.PENDING,),
+        ).fetchone()
+        oldest_pending_age = None
+        if oldest_row["oldest"]:
+            oldest_dt = datetime.fromisoformat(oldest_row["oldest"])
+            oldest_pending_age = round((datetime.now(timezone.utc) - oldest_dt).total_seconds(), 2)
+
         return {
             "total": sum(counts.values()),
             **counts,
+            "avg_completion_time_seconds": avg_completion_time,
+            "tasks_completed_last_hour": tasks_completed_last_hour,
+            "oldest_pending_task_age_seconds": oldest_pending_age,
         }
 
     def get_blocked_by(self, task_id: int) -> list[int]:
@@ -269,6 +306,10 @@ class TaskStore:
         ).fetchall()
         return [row["tag"] for row in rows]
 
+    @staticmethod
+    def _parse_optional_dt(value: str | None) -> datetime | None:
+        return datetime.fromisoformat(value) if value else None
+
     def _row_to_task(self, row: sqlite3.Row) -> Task:
         """Convert a single row to a Task (makes 2 extra queries for tags/deps)."""
         task_id = row["id"]
@@ -285,6 +326,8 @@ class TaskStore:
             max_retries=row["max_retries"],
             blocked_by=self.get_blocked_by(task_id),
             tags=self.get_tags(task_id),
+            started_at=self._parse_optional_dt(row["started_at"]),
+            completed_at=self._parse_optional_dt(row["completed_at"]),
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )
@@ -333,6 +376,8 @@ class TaskStore:
                 max_retries=row["max_retries"],
                 blocked_by=deps_by_id[tid],
                 tags=tags_by_id[tid],
+                started_at=self._parse_optional_dt(row["started_at"]),
+                completed_at=self._parse_optional_dt(row["completed_at"]),
                 created_at=datetime.fromisoformat(row["created_at"]),
                 updated_at=datetime.fromisoformat(row["updated_at"]),
             ))

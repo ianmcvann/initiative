@@ -351,3 +351,83 @@ def test_close(tmp_path):
     store.close()
     with pytest.raises(Exception):
         store.add_task("After close", "desc")
+
+
+def test_get_next_task_sets_started_at(store):
+    """get_next_task sets started_at timestamp."""
+    task_id = store.add_task("Task", "desc")
+    task = store.get_task(task_id)
+    assert task.started_at is None
+    task = store.get_next_task()
+    assert task.started_at is not None
+
+
+def test_complete_task_sets_completed_at(store):
+    """complete_task sets completed_at timestamp."""
+    task_id = store.add_task("Task", "desc")
+    store.get_next_task()
+    store.complete_task(task_id, result="done")
+    task = store.get_task(task_id)
+    assert task.completed_at is not None
+    assert task.started_at is not None
+
+
+def test_fail_task_permanent_sets_completed_at(store):
+    """Permanent failure sets completed_at timestamp."""
+    task_id = store.add_task("Task", "desc", max_retries=0)
+    store.get_next_task()
+    store.fail_task(task_id, error="broke")
+    task = store.get_task(task_id)
+    assert task.completed_at is not None
+
+
+def test_fail_task_retry_no_completed_at(store):
+    """Auto-retry does not set completed_at."""
+    task_id = store.add_task("Task", "desc", max_retries=2)
+    store.get_next_task()
+    store.fail_task(task_id, error="retry me")
+    task = store.get_task(task_id)
+    assert task.completed_at is None
+    assert task.status == TaskStatus.PENDING
+
+
+def test_get_status_includes_metrics(store):
+    """get_status includes execution metrics."""
+    status = store.get_status()
+    assert "avg_completion_time_seconds" in status
+    assert "tasks_completed_last_hour" in status
+    assert "oldest_pending_task_age_seconds" in status
+
+
+def test_get_status_avg_completion_time(store):
+    """avg_completion_time_seconds is computed for completed tasks."""
+    task_id = store.add_task("Task", "desc")
+    store.get_next_task()
+    store.complete_task(task_id, result="done")
+    status = store.get_status()
+    assert status["avg_completion_time_seconds"] is not None
+    assert status["avg_completion_time_seconds"] >= 0
+
+
+def test_get_status_no_completed_tasks(store):
+    """avg_completion_time_seconds is None when no tasks completed."""
+    store.add_task("Task", "desc")
+    status = store.get_status()
+    assert status["avg_completion_time_seconds"] is None
+
+
+def test_get_status_oldest_pending_age(store):
+    """oldest_pending_task_age_seconds tracks oldest pending task."""
+    store.add_task("Old task", "desc")
+    status = store.get_status()
+    assert status["oldest_pending_task_age_seconds"] is not None
+    assert status["oldest_pending_task_age_seconds"] >= 0
+
+
+def test_get_status_no_pending_tasks(store):
+    """oldest_pending_task_age_seconds is None when no pending tasks."""
+    task_id = store.add_task("Task", "desc")
+    store.get_next_task()
+    store.complete_task(task_id)
+    status = store.get_status()
+    assert status["oldest_pending_task_age_seconds"] is None
