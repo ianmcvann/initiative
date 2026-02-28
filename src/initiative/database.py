@@ -10,7 +10,10 @@ from .models import Task, TaskStatus
 
 logger = logging.getLogger("initiative.database")
 
-_SCHEMA = """
+_SCHEMA_VERSION = 1
+
+_MIGRATIONS: dict[int, str] = {
+    1: """
 CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
@@ -42,7 +45,8 @@ CREATE TABLE IF NOT EXISTS task_tags (
     PRIMARY KEY (task_id, tag),
     FOREIGN KEY (task_id) REFERENCES tasks(id)
 );
-"""
+""",
+}
 
 
 class TaskStore:
@@ -52,8 +56,24 @@ class TaskStore:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
-        self._conn.executescript(_SCHEMA)
+        self._apply_migrations()
         logger.debug("Database connected: %s", db_path)
+
+    def _apply_migrations(self) -> None:
+        """Apply pending schema migrations."""
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)"
+        )
+        row = self._conn.execute("SELECT MAX(version) as v FROM schema_version").fetchone()
+        current = row["v"] if row["v"] is not None else 0
+        for version in range(current + 1, _SCHEMA_VERSION + 1):
+            if version in _MIGRATIONS:
+                self._conn.executescript(_MIGRATIONS[version])
+                self._conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
+                self._conn.commit()
+                logger.info("Applied migration %d", version)
+        # Re-enable foreign keys after executescript
+        self._conn.execute("PRAGMA foreign_keys=ON")
 
     def close(self) -> None:
         """Close the database connection."""
@@ -219,6 +239,21 @@ class TaskStore:
         self._conn.commit()
         logger.info("Task manually retried: id=%d", task_id)
         return self.get_task(task_id)
+
+    def recover_stale_tasks(self, timeout_minutes: int = 30) -> int:
+        """Reset tasks stuck in in_progress for longer than timeout_minutes back to pending.
+        Returns the number of tasks recovered."""
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = self._conn.execute(
+            """UPDATE tasks SET status = ?, started_at = NULL, updated_at = ?
+            WHERE status = ? AND updated_at < datetime(?, ?)""",
+            (TaskStatus.PENDING, now, TaskStatus.IN_PROGRESS, now, f"-{timeout_minutes} minutes"),
+        )
+        count = cursor.rowcount
+        self._conn.commit()
+        if count > 0:
+            logger.info("Recovered %d stale tasks (timeout=%d min)", count, timeout_minutes)
+        return count
 
     def _build_filter_query(
         self, select: str, status: TaskStatus | None, tag: str | None

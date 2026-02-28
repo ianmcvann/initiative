@@ -433,3 +433,18 @@ async def test_get_summary_pagination(server):
     assert data["count"] == 3
     assert data["total"] == 5
     assert data["has_more"] is True
+
+
+@pytest.mark.anyio
+async def test_recover_stale_tasks_tool(server):
+    """recover_stale_tasks tool returns recovered count."""
+    data = await call_tool(server, "recover_stale_tasks")
+    assert data["recovered"] == 0
+    assert data["timeout_minutes"] == 30
+
+
+@pytest.mark.anyio
+async def test_recover_stale_tasks_invalid_timeout(server):
+    """recover_stale_tasks rejects timeout < 1."""
+    data = await call_tool(server, "recover_stale_tasks", {"timeout_minutes": 0})
+    assert "error" in data

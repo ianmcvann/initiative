@@ -549,3 +549,41 @@ def test_get_summary_pagination(store):
     summaries2, total2 = store.get_summary(limit=3, offset=3)
     assert len(summaries2) == 2
     assert total2 == 5
+
+
+def test_recover_stale_tasks_none_stale(store):
+    """recover_stale_tasks returns 0 when no tasks are stale."""
+    store.add_task("Task", "desc")
+    store.get_next_task()
+    count = store.recover_stale_tasks(timeout_minutes=30)
+    assert count == 0
+
+
+def test_recover_stale_tasks_recovers_old(store):
+    """recover_stale_tasks resets tasks with old updated_at."""
+    task_id = store.add_task("Task", "desc")
+    store.get_next_task()
+    # Manually backdate updated_at to simulate a stale task
+    store._conn.execute(
+        "UPDATE tasks SET updated_at = datetime('now', '-60 minutes') WHERE id = ?",
+        (task_id,),
+    )
+    store._conn.commit()
+    count = store.recover_stale_tasks(timeout_minutes=30)
+    assert count == 1
+    task = store.get_task(task_id)
+    assert task.status == TaskStatus.PENDING
+    assert task.started_at is None
+
+
+def test_recover_stale_tasks_ignores_pending(store):
+    """recover_stale_tasks does not affect pending tasks."""
+    store.add_task("Task", "desc")
+    count = store.recover_stale_tasks(timeout_minutes=1)
+    assert count == 0
+
+
+def test_schema_migration_applied(store):
+    """Schema version table exists and has correct version."""
+    row = store._conn.execute("SELECT MAX(version) as v FROM schema_version").fetchone()
+    assert row["v"] == 1

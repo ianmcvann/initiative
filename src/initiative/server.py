@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import json
 import logging
 from typing import Optional, Sequence
@@ -24,6 +25,11 @@ def _validate_task_id(task_id: int) -> str | None:
 def create_server(db_path: str = "initiative.db") -> FastMCP:
     mcp = FastMCP("initiative")
     store = TaskStore(db_path)
+    atexit.register(store.close)
+    # Recover any stale tasks from previous crashed sessions
+    recovered = store.recover_stale_tasks()
+    if recovered:
+        logger.info("Recovered %d stale tasks on startup", recovered)
 
     @mcp.tool()
     async def add_task(
@@ -278,6 +284,19 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
             "offset": offset,
             "has_more": offset + len(tasks) < total,
         })
+
+    @mcp.tool()
+    async def recover_stale_tasks(timeout_minutes: int = 30) -> str:
+        """Reset tasks stuck in in_progress for longer than timeout back to pending.
+
+        Args:
+            timeout_minutes: How long a task must be stuck before recovery (default 30).
+        """
+        if timeout_minutes < 1:
+            return json.dumps({"error": "timeout_minutes must be >= 1"})
+        logger.info("recover_stale_tasks called: timeout=%d", timeout_minutes)
+        count = store.recover_stale_tasks(timeout_minutes)
+        return json.dumps({"recovered": count, "timeout_minutes": timeout_minutes})
 
     return mcp
 
