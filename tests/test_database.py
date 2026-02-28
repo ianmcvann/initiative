@@ -899,3 +899,90 @@ def test_get_status_includes_cancelled(store):
     assert status["cancelled"] == 1
     assert status["pending"] == 1
     assert status["total"] == 2
+
+
+# --- worker_id tracking tests ---
+
+
+def test_get_next_task_sets_worker_id(store):
+    """get_next_task with worker_id sets worker_id on the claimed task."""
+    store.add_task("Task", "desc")
+    task = store.get_next_task(worker_id="agent-1")
+    assert task.worker_id == "agent-1"
+    # Verify it persists in the database
+    fetched = store.get_task(task.id)
+    assert fetched.worker_id == "agent-1"
+
+
+def test_get_next_task_no_worker_id(store):
+    """get_next_task without worker_id leaves worker_id as None."""
+    store.add_task("Task", "desc")
+    task = store.get_next_task()
+    assert task.worker_id is None
+    # Verify it persists in the database
+    fetched = store.get_task(task.id)
+    assert fetched.worker_id is None
+
+
+# --- purge_completed tests ---
+
+
+def test_purge_completed(store):
+    """purge_completed deletes only completed tasks by default."""
+    # Create tasks in various states
+    t1 = store.add_task("Pending", "desc")
+    t2 = store.add_task("Will complete", "desc", priority=10)
+    t3 = store.add_task("Will fail", "desc", priority=5, max_retries=0)
+    t4 = store.add_task("Will cancel", "desc")
+
+    # Move t2 to completed
+    store.get_next_task()  # gets t2 (highest priority)
+    store.complete_task(t2)
+
+    # Move t3 to failed
+    store.get_next_task()  # gets t3 (next highest)
+    store.fail_task(t3, error="broke")
+
+    # Cancel t4
+    store.cancel_task(t4)
+
+    # Purge only completed
+    count = store.purge_completed()
+    assert count == 1
+
+    # Verify t2 is gone
+    assert store.get_task(t2) is None
+
+    # Verify others remain
+    assert store.get_task(t1) is not None
+    assert store.get_task(t3) is not None
+    assert store.get_task(t4) is not None
+
+
+def test_purge_with_failed_and_cancelled(store):
+    """purge_completed with include_failed and include_cancelled deletes all terminal tasks."""
+    t1 = store.add_task("Pending", "desc")
+    t2 = store.add_task("Will complete", "desc", priority=10)
+    t3 = store.add_task("Will fail", "desc", priority=5, max_retries=0)
+    t4 = store.add_task("Will cancel", "desc")
+
+    # Move t2 to completed
+    store.get_next_task()
+    store.complete_task(t2)
+
+    # Move t3 to failed
+    store.get_next_task()
+    store.fail_task(t3, error="broke")
+
+    # Cancel t4
+    store.cancel_task(t4)
+
+    # Purge completed, failed, and cancelled
+    count = store.purge_completed(include_failed=True, include_cancelled=True)
+    assert count == 3
+
+    # Verify only the pending task remains
+    assert store.get_task(t1) is not None
+    assert store.get_task(t2) is None
+    assert store.get_task(t3) is None
+    assert store.get_task(t4) is None

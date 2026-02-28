@@ -79,10 +79,14 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
         return json.dumps({"task_id": task_id, "title": title, "status": "pending", "max_retries": max_retries, "depends_on": deps or [], "tags": tag_list or []})
 
     @mcp.tool()
-    async def get_next_task() -> str:
-        """Pull the highest-priority pending task and mark it in-progress."""
-        logger.info("get_next_task called")
-        task = store.get_next_task()
+    async def get_next_task(worker_id: str = "") -> str:
+        """Pull the highest-priority pending task and mark it in-progress.
+
+        Args:
+            worker_id: Optional identifier for the worker claiming this task.
+        """
+        logger.info("get_next_task called: worker_id=%r", worker_id)
+        task = store.get_next_task(worker_id=worker_id or None)
         if task is None:
             logger.warning("get_next_task: no pending tasks available")
             return json.dumps({"message": "No pending tasks"})
@@ -393,6 +397,30 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
         logger.info("recover_stale_tasks called: timeout=%d", timeout_minutes)
         count = store.recover_stale_tasks(timeout_minutes)
         return json.dumps({"recovered": count, "timeout_minutes": timeout_minutes})
+
+    @mcp.tool()
+    async def purge_completed(
+        include_failed: bool = False,
+        include_cancelled: bool = False,
+    ) -> str:
+        """Delete completed tasks (and optionally failed/cancelled). Returns count deleted.
+
+        Args:
+            include_failed: Also delete failed tasks (default False).
+            include_cancelled: Also delete cancelled tasks (default False).
+        """
+        logger.info("purge_completed called: include_failed=%s include_cancelled=%s", include_failed, include_cancelled)
+        count = store.purge_completed(include_failed=include_failed, include_cancelled=include_cancelled)
+        statuses = ["completed"]
+        if include_failed:
+            statuses.append("failed")
+        if include_cancelled:
+            statuses.append("cancelled")
+        return json.dumps({
+            "deleted": count,
+            "statuses_purged": statuses,
+            "message": f"Purged {count} tasks",
+        })
 
     @mcp.tool()
     async def decompose_task(

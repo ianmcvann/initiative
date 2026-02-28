@@ -174,7 +174,7 @@ class TaskStore:
             return None
         return self._row_to_task(row)
 
-    def get_next_task(self) -> Task | None:
+    def get_next_task(self, worker_id: str | None = None) -> Task | None:
         with self.transaction():
             row = self._conn.execute(
                 """SELECT t.* FROM tasks t
@@ -192,8 +192,8 @@ class TaskStore:
                 return None
             now = datetime.now(timezone.utc).isoformat()
             self._conn.execute(
-                "UPDATE tasks SET status = ?, started_at = ?, updated_at = ? WHERE id = ?",
-                (TaskStatus.IN_PROGRESS, now, now, row["id"]),
+                "UPDATE tasks SET status = ?, worker_id = ?, started_at = ?, updated_at = ? WHERE id = ?",
+                (TaskStatus.IN_PROGRESS, worker_id, now, now, row["id"]),
             )
             # Re-fetch the row to get accurate updated_at (and all other fields)
             row = self._conn.execute(
@@ -464,6 +464,33 @@ class TaskStore:
                 (limit, offset),
             ).fetchall()
         return [{"id": r["id"], "title": r["title"], "status": r["status"], "priority": r["priority"]} for r in rows], total
+
+    def purge_completed(self, include_failed: bool = False, include_cancelled: bool = False) -> int:
+        """Delete completed tasks (and optionally failed/cancelled). Returns count deleted."""
+        statuses = [TaskStatus.COMPLETED.value]
+        if include_failed:
+            statuses.append(TaskStatus.FAILED.value)
+        if include_cancelled:
+            statuses.append(TaskStatus.CANCELLED.value)
+        placeholders = ",".join("?" * len(statuses))
+        # Delete dependencies first (FK), then tags, then tasks
+        self._conn.execute(
+            f"DELETE FROM task_dependencies WHERE task_id IN (SELECT id FROM tasks WHERE status IN ({placeholders})) OR depends_on_id IN (SELECT id FROM tasks WHERE status IN ({placeholders}))",
+            statuses + statuses,
+        )
+        self._conn.execute(
+            f"DELETE FROM task_tags WHERE task_id IN (SELECT id FROM tasks WHERE status IN ({placeholders}))",
+            statuses,
+        )
+        cursor = self._conn.execute(
+            f"DELETE FROM tasks WHERE status IN ({placeholders})",
+            statuses,
+        )
+        self._conn.commit()
+        count = cursor.rowcount
+        if count > 0:
+            logger.info("Purged %d tasks (statuses=%s)", count, statuses)
+        return count
 
     def cascade_cancel_dependents(self, task_id: int, _commit: bool = True) -> int:
         """Cancel all tasks that depend on the given task (directly or transitively).
