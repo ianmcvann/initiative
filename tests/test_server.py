@@ -357,3 +357,28 @@ async def test_get_summary_invalid_status(server):
     """get_summary returns error for invalid status."""
     data = await call_tool(server, "get_summary", {"status": "bogus"})
     assert "error" in data
+
+
+@pytest.mark.anyio
+async def test_complete_task_not_found(server):
+    """complete_task returns error for nonexistent task."""
+    data = await call_tool(server, "complete_task", {"task_id": 999})
+    assert data["error"] == "Task not found"
+
+
+@pytest.mark.anyio
+async def test_complete_task_not_in_progress(server):
+    """complete_task returns error for pending task."""
+    add_data = await call_tool(server, "add_task", {"title": "T", "description": "d"})
+    data = await call_tool(server, "complete_task", {"task_id": add_data["task_id"]})
+    assert "error" in data
+    assert "not in_progress" in data["error"]
+
+
+@pytest.mark.anyio
+async def test_fail_task_not_in_progress(server):
+    """fail_task returns error for pending task."""
+    add_data = await call_tool(server, "add_task", {"title": "T", "description": "d"})
+    data = await call_tool(server, "fail_task", {"task_id": add_data["task_id"]})
+    assert "error" in data
+    assert "not in_progress" in data["error"]

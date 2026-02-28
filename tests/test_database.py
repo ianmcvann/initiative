@@ -458,3 +458,56 @@ def test_get_summary_filtered(store):
     completed = store.get_summary(status=TaskStatus.COMPLETED)
     assert len(completed) == 1
     assert completed[0]["title"] == "Will complete"
+
+
+def test_complete_task_returns_false_for_nonexistent(store):
+    """complete_task returns False for nonexistent task."""
+    assert store.complete_task(9999) is False
+
+
+def test_complete_task_returns_false_for_pending(store):
+    """complete_task returns False for a pending task (not in_progress)."""
+    task_id = store.add_task("Task", "desc")
+    assert store.complete_task(task_id) is False
+    task = store.get_task(task_id)
+    assert task.status == TaskStatus.PENDING
+
+
+def test_complete_task_returns_false_for_already_completed(store):
+    """complete_task returns False if task already completed."""
+    task_id = store.add_task("Task", "desc")
+    store.get_next_task()
+    assert store.complete_task(task_id) is True
+    assert store.complete_task(task_id) is False
+
+
+def test_fail_task_returns_unchanged_for_pending(store):
+    """fail_task on a pending task returns it unchanged."""
+    task_id = store.add_task("Task", "desc")
+    task = store.fail_task(task_id, error="nope")
+    assert task.status == TaskStatus.PENDING
+    assert task.error is None  # unchanged
+
+
+def test_fail_task_returns_unchanged_for_completed(store):
+    """fail_task on a completed task returns it unchanged."""
+    task_id = store.add_task("Task", "desc")
+    store.get_next_task()
+    store.complete_task(task_id)
+    task = store.fail_task(task_id, error="nope")
+    assert task.status == TaskStatus.COMPLETED
+
+
+def test_retry_task_resets_completed_at(store):
+    """retry_task resets completed_at and started_at to None."""
+    task_id = store.add_task("Task", "desc", max_retries=0)
+    store.get_next_task()
+    store.fail_task(task_id, error="broke")
+    task = store.get_task(task_id)
+    assert task.completed_at is not None
+    assert task.started_at is not None
+
+    task = store.retry_task(task_id)
+    assert task.completed_at is None
+    assert task.started_at is None
+    assert task.status == TaskStatus.PENDING

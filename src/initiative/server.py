@@ -94,7 +94,12 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
         if err:
             return json.dumps({"error": err, "task_id": task_id})
         logger.info("complete_task called: task_id=%d", task_id)
-        store.complete_task(task_id, result)
+        success = store.complete_task(task_id, result)
+        if not success:
+            task = store.get_task(task_id)
+            if task is None:
+                return json.dumps({"error": "Task not found", "task_id": task_id})
+            return json.dumps({"error": f"Task is {task.status}, not in_progress", "task_id": task_id, "status": str(task.status)})
         return json.dumps({"task_id": task_id, "status": "completed", "result": result})
 
     @mcp.tool()
@@ -110,9 +115,13 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
         if err:
             return json.dumps({"error": err, "task_id": task_id})
         logger.info("fail_task called: task_id=%d", task_id)
-        task = store.fail_task(task_id, error)
-        if task is None:
+        # Check current status before attempting fail
+        current = store.get_task(task_id)
+        if current is None:
             return json.dumps({"error": "Task not found", "task_id": task_id})
+        if current.status != TaskStatus.IN_PROGRESS:
+            return json.dumps({"error": f"Task is {current.status}, not in_progress", "task_id": task_id, "status": str(current.status)})
+        task = store.fail_task(task_id, error)
         if task.status == TaskStatus.PENDING:
             return json.dumps({
                 "task_id": task_id,
