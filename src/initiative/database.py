@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from .models import Task, TaskStatus
 
 logger = logging.getLogger("initiative.database")
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 _MIGRATIONS: dict[int, str] = {
     1: """
@@ -46,6 +47,12 @@ CREATE TABLE IF NOT EXISTS task_tags (
     FOREIGN KEY (task_id) REFERENCES tasks(id)
 );
 """,
+    2: """
+CREATE INDEX IF NOT EXISTS idx_tasks_status_priority ON tasks(status, priority DESC, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_task_dependencies_task_id ON task_dependencies(task_id);
+CREATE INDEX IF NOT EXISTS idx_task_dependencies_depends_on ON task_dependencies(depends_on_id);
+CREATE INDEX IF NOT EXISTS idx_task_tags_task_id ON task_tags(task_id);
+""",
 }
 
 
@@ -56,6 +63,7 @@ class TaskStore:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
         self._apply_migrations()
         logger.debug("Database connected: %s", db_path)
 
@@ -74,6 +82,24 @@ class TaskStore:
                 logger.info("Applied migration %d", version)
         # Re-enable foreign keys after executescript
         self._conn.execute("PRAGMA foreign_keys=ON")
+
+    @contextmanager
+    def transaction(self):
+        """Context manager for explicit transactions.
+
+        Usage::
+
+            with store.transaction():
+                store.add_task(..., _commit=False)
+                store.add_tag(..., _commit=False)
+        """
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield
+            self._conn.commit()
+        except BaseException:
+            self._conn.rollback()
+            raise
 
     def close(self) -> None:
         """Close the database connection."""
@@ -100,6 +126,7 @@ class TaskStore:
         max_retries: int = 2,
         depends_on: list[int] | None = None,
         tags: list[str] | None = None,
+        _commit: bool = True,
     ) -> int:
         if depends_on:
             for dep_id in depends_on:
@@ -123,7 +150,8 @@ class TaskStore:
                     "INSERT INTO task_tags (task_id, tag) VALUES (?, ?)",
                     (task_id, tag),
                 )
-        self._conn.commit()
+        if _commit:
+            self._conn.commit()
         logger.info("Task added: id=%d title=%r depends_on=%s tags=%s", task_id, title, depends_on, tags)
         return task_id
 
@@ -180,67 +208,76 @@ class TaskStore:
         logger.info("Task started: id=%d title=%r", task.id, task.title)
         return task
 
-    def complete_task(self, task_id: int, result: str = "") -> bool:
-        """Mark a task as completed. Returns True on success, False if task not found or not in_progress."""
-        task = self.get_task(task_id)
-        if task is None:
-            logger.warning("complete_task: task %d not found", task_id)
-            return False
-        if task.status != TaskStatus.IN_PROGRESS:
-            logger.warning("complete_task: task %d is %s, not in_progress", task_id, task.status)
-            return False
+    def complete_task(self, task_id: int, result: str = "", _commit: bool = True) -> bool:
+        """Mark a task as completed. Returns True on success, False if task not found or not in_progress.
+
+        Uses an atomic conditional UPDATE to avoid TOCTOU race conditions.
+        """
         now = datetime.now(timezone.utc).isoformat()
-        self._conn.execute(
-            "UPDATE tasks SET status = ?, result = ?, completed_at = ?, updated_at = ? WHERE id = ?",
-            (TaskStatus.COMPLETED, result, now, now, task_id),
+        cursor = self._conn.execute(
+            "UPDATE tasks SET status = ?, result = ?, completed_at = ?, updated_at = ? WHERE id = ? AND status = ?",
+            (TaskStatus.COMPLETED.value, result, now, now, task_id, TaskStatus.IN_PROGRESS.value),
         )
-        self._conn.commit()
-        logger.info("Task completed: id=%d", task_id)
-        return True
+        if _commit:
+            self._conn.commit()
+        if cursor.rowcount == 1:
+            logger.info("Task completed: id=%d", task_id)
+            return True
+        logger.warning("complete_task: task %d not found or not in_progress", task_id)
+        return False
 
     def fail_task(self, task_id: int, error: str = "") -> Task | None:
+        """Mark a task as failed. Uses atomic conditional UPDATE to avoid TOCTOU races.
+
+        If retries < max_retries, the task is auto-retried (set back to pending).
+        Otherwise it is permanently marked as failed.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        # Attempt auto-retry: atomically update only if status=in_progress AND retries < max_retries
+        cursor = self._conn.execute(
+            "UPDATE tasks SET status = ?, error = ?, retries = retries + 1, updated_at = ? "
+            "WHERE id = ? AND status = ? AND retries < max_retries",
+            (TaskStatus.PENDING.value, error, now, task_id, TaskStatus.IN_PROGRESS.value),
+        )
+        if cursor.rowcount == 1:
+            self._conn.commit()
+            task = self.get_task(task_id)
+            logger.info("Task auto-retried: id=%d retries=%d/%d", task_id, task.retries, task.max_retries)
+            return task
+        # Attempt permanent failure: atomically update only if status=in_progress AND retries >= max_retries
+        cursor = self._conn.execute(
+            "UPDATE tasks SET status = ?, error = ?, completed_at = ?, updated_at = ? "
+            "WHERE id = ? AND status = ? AND retries >= max_retries",
+            (TaskStatus.FAILED.value, error, now, now, task_id, TaskStatus.IN_PROGRESS.value),
+        )
+        if cursor.rowcount == 1:
+            self._conn.commit()
+            logger.info("Task permanently failed: id=%d", task_id)
+            return self.get_task(task_id)
+        # Neither matched: task not found or not in_progress
         task = self.get_task(task_id)
         if task is None:
             return None
-        if task.status != TaskStatus.IN_PROGRESS:
-            logger.warning("fail_task: task %d is %s, not in_progress", task_id, task.status)
-            return task
-        now = datetime.now(timezone.utc).isoformat()
-        if task.retries < task.max_retries:
-            # Auto-retry: increment retries and set back to pending
-            self._conn.execute(
-                "UPDATE tasks SET status = ?, error = ?, retries = retries + 1, updated_at = ? WHERE id = ?",
-                (TaskStatus.PENDING, error, now, task_id),
-            )
-            self._conn.commit()
-            logger.info("Task auto-retried: id=%d retries=%d/%d", task_id, task.retries + 1, task.max_retries)
-        else:
-            # Max retries exceeded: mark as permanently failed
-            self._conn.execute(
-                "UPDATE tasks SET status = ?, error = ?, completed_at = ?, updated_at = ? WHERE id = ?",
-                (TaskStatus.FAILED, error, now, now, task_id),
-            )
-            self._conn.commit()
-            logger.info("Task permanently failed: id=%d", task_id)
-        return self.get_task(task_id)
+        logger.warning("fail_task: task %d is %s, not in_progress", task_id, task.status)
+        return task
 
-    def cancel_task(self, task_id: int) -> bool:
-        """Cancel a pending or in_progress task. Returns True on success, False if task not found or already completed/failed/cancelled."""
-        task = self.get_task(task_id)
-        if task is None:
-            logger.warning("cancel_task: task %d not found", task_id)
-            return False
-        if task.status not in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS):
-            logger.warning("cancel_task: task %d is %s, cannot cancel", task_id, task.status)
-            return False
+    def cancel_task(self, task_id: int, _commit: bool = True) -> bool:
+        """Cancel a pending or in_progress task. Returns True on success, False if task not found or already completed/failed/cancelled.
+
+        Uses an atomic conditional UPDATE to avoid TOCTOU race conditions.
+        """
         now = datetime.now(timezone.utc).isoformat()
-        self._conn.execute(
-            "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?",
-            (TaskStatus.CANCELLED, now, task_id),
+        cursor = self._conn.execute(
+            "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ? AND status IN (?, ?)",
+            (TaskStatus.CANCELLED.value, now, task_id, TaskStatus.PENDING.value, TaskStatus.IN_PROGRESS.value),
         )
-        self._conn.commit()
-        logger.info("Task cancelled: id=%d", task_id)
-        return True
+        if _commit:
+            self._conn.commit()
+        if cursor.rowcount == 1:
+            logger.info("Task cancelled: id=%d", task_id)
+            return True
+        logger.warning("cancel_task: task %d not found or cannot cancel", task_id)
+        return False
 
     def update_task(self, task_id: int, title: str | None = None, description: str | None = None, priority: int | None = None) -> Task | None:
         """Update specified fields on a pending task. Returns the updated task or None if not found/not pending."""
@@ -425,13 +462,14 @@ class TaskStore:
         ).fetchall()
         return [row["depends_on_id"] for row in rows]
 
-    def add_tag(self, task_id: int, tag: str) -> None:
+    def add_tag(self, task_id: int, tag: str, _commit: bool = True) -> None:
         """Add a tag to a task."""
         self._conn.execute(
             "INSERT OR IGNORE INTO task_tags (task_id, tag) VALUES (?, ?)",
             (task_id, tag),
         )
-        self._conn.commit()
+        if _commit:
+            self._conn.commit()
         logger.info("Tag added: task_id=%d tag=%r", task_id, tag)
 
     def remove_tag(self, task_id: int, tag: str) -> None:

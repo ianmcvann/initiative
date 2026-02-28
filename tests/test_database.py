@@ -587,7 +587,7 @@ def test_recover_stale_tasks_ignores_pending(store):
 def test_schema_migration_applied(store):
     """Schema version table exists and has correct version."""
     row = store._conn.execute("SELECT MAX(version) as v FROM schema_version").fetchone()
-    assert row["v"] == 1
+    assert row["v"] == 2
 
 
 # --- cancel_task tests ---

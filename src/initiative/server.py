@@ -409,9 +409,9 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
             return json.dumps({"error": "Maximum 20 subtasks allowed"})
 
         logger.info("decompose_task called: task_id=%d subtasks=%d", task_id, len(subtasks))
-        store.add_tag(task_id, "epic")
-        created_ids = []
-        prev_id = None
+
+        # Validate all subtasks before starting the transaction
+        validated = []
         for st in subtasks:
             title = st.get("title", "")
             desc = st.get("description", "")
@@ -426,14 +426,21 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
                 return json.dumps({"error": "Subtask description must be 50000 characters or fewer"})
             if not isinstance(priority, (int, float)) or not 0 <= priority <= 1000:
                 return json.dumps({"error": "Subtask priority must be between 0 and 1000"})
-            depends = [prev_id] if prev_id else None
-            sub_id = store.add_task(title, desc, priority=priority, depends_on=depends)
-            store.add_tag(sub_id, "subtask")
-            store.add_tag(sub_id, f"epic:{task_id}")
-            created_ids.append(sub_id)
-            prev_id = sub_id
+            validated.append((title, desc, priority))
 
-        store.cancel_task(task_id)
+        # Perform all mutations atomically within a single transaction
+        created_ids = []
+        with store.transaction():
+            store.add_tag(task_id, "epic", _commit=False)
+            prev_id = None
+            for title, desc, priority in validated:
+                depends = [prev_id] if prev_id else None
+                sub_id = store.add_task(title, desc, priority=priority, depends_on=depends, _commit=False)
+                store.add_tag(sub_id, "subtask", _commit=False)
+                store.add_tag(sub_id, f"epic:{task_id}", _commit=False)
+                created_ids.append(sub_id)
+                prev_id = sub_id
+            store.cancel_task(task_id, _commit=False)
         return json.dumps({
             "parent_id": task_id,
             "subtask_ids": created_ids,
