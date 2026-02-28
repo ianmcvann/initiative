@@ -843,12 +843,6 @@ def test_cascade_cancel_skips_completed(store):
     """Cascade does not cancel already-completed tasks."""
     a_id = store.add_task("Task A", "desc")
     b_id = store.add_task("Task B", "desc", depends_on=[a_id])
-    # Complete B first (by removing its dependency constraint manually to simulate)
-    # Instead, create B without dependency, complete it, then add the dependency
-    # Actually, let's just test with the real flow: complete B before cancelling A
-    # B can't be completed if it depends on A... so let's set up differently:
-    # A and B are independent. C depends on A. Complete C (make it independent first).
-    # Simpler: just force B to completed status directly.
     store._conn.execute(
         "UPDATE tasks SET status = ? WHERE id = ?",
         (TaskStatus.COMPLETED.value, b_id),
@@ -860,6 +854,40 @@ def test_cascade_cancel_skips_completed(store):
     store.cancel_task(a_id)
     b = store.get_task(b_id)
     assert b.status == TaskStatus.COMPLETED
+
+
+# --- get_status ready vs blocked tests ---
+
+
+def test_get_status_pending_ready_and_blocked(store):
+    """get_status reports pending_ready and pending_blocked counts correctly."""
+    a_id = store.add_task("Task A", "desc")
+    b_id = store.add_task("Task B", "desc", depends_on=[a_id])
+    c_id = store.add_task("Task C", "desc")
+
+    status = store.get_status()
+    assert status["pending"] == 3
+    assert status["pending_ready"] == 2
+    assert status["pending_blocked"] == 1
+
+    store.get_next_task()
+    store.complete_task(a_id)
+    status = store.get_status()
+    assert status["pending"] == 2
+    assert status["pending_ready"] == 2
+    assert status["pending_blocked"] == 0
+
+
+def test_get_status_all_ready(store):
+    """When no tasks have dependencies, all pending tasks are ready."""
+    store.add_task("Task 1", "desc")
+    store.add_task("Task 2", "desc")
+    store.add_task("Task 3", "desc")
+
+    status = store.get_status()
+    assert status["pending"] == 3
+    assert status["pending_ready"] == 3
+    assert status["pending_blocked"] == 0
 
 
 def test_get_status_includes_cancelled(store):

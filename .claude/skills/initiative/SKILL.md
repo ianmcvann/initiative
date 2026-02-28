@@ -13,7 +13,11 @@ Repeat this loop forever. NEVER stop unless the user explicitly asks you to:
 
 ### 1. Check for pending tasks
 
-Call the `get_next_task` tool. If a task is returned, go to step 2. If no tasks are pending, go to step 3.
+Call the `get_next_task` tool.
+- If a task is returned, go to step 2.
+- If no task is returned, call `get_status` to check the queue.
+  - If `pending > 0` but `get_next_task` returned nothing, all pending tasks are **blocked** on dependencies being worked on by other agents. Log this (e.g., "All N pending tasks are blocked — waiting for dependencies") and wait briefly before retrying step 1.
+  - If `pending == 0`, go to step 3.
 
 ### 2. Execute the task
 

@@ -414,9 +414,25 @@ class TaskStore:
             oldest_dt = datetime.fromisoformat(oldest_row["oldest"])
             oldest_pending_age = round((datetime.now(timezone.utc) - oldest_dt).total_seconds(), 2)
 
+        # Pending tasks split: ready (no uncompleted deps) vs blocked
+        pending_ready_row = self._conn.execute(
+            """SELECT COUNT(*) as count FROM tasks
+            WHERE status = ?
+            AND NOT EXISTS (
+                SELECT 1 FROM task_dependencies td
+                JOIN tasks dep ON td.depends_on_id = dep.id
+                WHERE td.task_id = tasks.id AND dep.status != ?
+            )""",
+            (TaskStatus.PENDING, TaskStatus.COMPLETED),
+        ).fetchone()
+        pending_ready = pending_ready_row["count"]
+        pending_blocked = counts.get(str(TaskStatus.PENDING), 0) - pending_ready
+
         return {
             "total": sum(counts.values()),
             **counts,
+            "pending_ready": pending_ready,
+            "pending_blocked": pending_blocked,
             "avg_completion_time_seconds": avg_completion_time,
             "tasks_completed_last_hour": tasks_completed_last_hour,
             "oldest_pending_task_age_seconds": oldest_pending_age,
