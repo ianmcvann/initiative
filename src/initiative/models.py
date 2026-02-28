@@ -28,6 +28,8 @@ class Task:
     max_retries: int = 2
     blocked_by: list[int] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -45,6 +47,8 @@ class Task:
             "max_retries": self.max_retries,
             "blocked_by": self.blocked_by,
             "tags": self.tags,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
         }
@@ -64,6 +68,8 @@ class Task:
             max_retries=data.get("max_retries", 2),
             blocked_by=data.get("blocked_by", []),
             tags=data.get("tags", []),
+            started_at=datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None,
+            completed_at=datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None,
             created_at=datetime.fromisoformat(data["created_at"]),
             updated_at=datetime.fromisoformat(data["updated_at"]),
         )
