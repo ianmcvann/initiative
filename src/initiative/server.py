@@ -233,17 +233,17 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
         if err:
             return json.dumps({"error": err, "task_id": task_id})
         logger.info("retry_task called: task_id=%d", task_id)
-        # Check current task status before attempting retry
-        current = store.get_task(task_id)
-        if current is None:
-            return json.dumps({"error": "Task not found", "task_id": task_id})
-        if current.status != TaskStatus.FAILED:
+        task = store.retry_task(task_id)
+        if task is None:
+            # Atomic UPDATE didn't match — figure out why
+            existing = store.get_task(task_id)
+            if existing is None:
+                return json.dumps({"error": "Task not found", "task_id": task_id})
             return json.dumps({
                 "error": "Task is not in failed status",
                 "task_id": task_id,
-                "status": str(current.status),
+                "status": str(existing.status),
             })
-        task = store.retry_task(task_id)
         return json.dumps({
             "task_id": task_id,
             "status": "pending",

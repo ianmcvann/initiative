@@ -160,10 +160,10 @@ def test_manual_retry_task(store):
 
 
 def test_retry_task_not_failed(store):
-    """Manual retry on a non-failed task returns the task unchanged."""
+    """Manual retry on a non-failed task returns None."""
     task_id = store.add_task("Pending task", "desc")
     task = store.retry_task(task_id)
-    assert task.status == TaskStatus.PENDING
+    assert task is None
 
 
 def test_retry_task_not_found(store):

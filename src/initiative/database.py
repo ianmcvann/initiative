@@ -195,9 +195,11 @@ class TaskStore:
                 "UPDATE tasks SET status = ?, started_at = ?, updated_at = ? WHERE id = ?",
                 (TaskStatus.IN_PROGRESS, now, now, row["id"]),
             )
+            # Re-fetch the row to get accurate updated_at (and all other fields)
+            row = self._conn.execute(
+                "SELECT * FROM tasks WHERE id = ?", (row["id"],)
+            ).fetchone()
         task = self._row_to_task(row)
-        task.status = TaskStatus.IN_PROGRESS
-        task.started_at = datetime.fromisoformat(now)
         logger.info("Task started: id=%d title=%r", task.id, task.title)
         return task
 
@@ -266,8 +268,7 @@ class TaskStore:
             self._conn.commit()
         if cursor.rowcount == 1:
             logger.info("Task cancelled: id=%d", task_id)
-            if _commit:
-                self.cascade_cancel_dependents(task_id)
+            self.cascade_cancel_dependents(task_id, _commit=_commit)
             return True
         logger.warning("cancel_task: task %d not found or cannot cancel", task_id)
         return False
@@ -307,20 +308,23 @@ class TaskStore:
         return self.get_task(task_id)
 
     def retry_task(self, task_id: int) -> Task | None:
-        """Manually retry a failed task by resetting its status to pending."""
-        task = self.get_task(task_id)
-        if task is None:
-            return None
-        if task.status != TaskStatus.FAILED:
-            return task
+        """Manually retry a failed task by resetting its status to pending.
+
+        Uses an atomic conditional UPDATE to avoid TOCTOU race conditions.
+        Returns the updated Task on success, None if task not found or not failed.
+        """
         now = datetime.now(timezone.utc).isoformat()
-        self._conn.execute(
-            "UPDATE tasks SET status = ?, error = NULL, retries = 0, started_at = NULL, completed_at = NULL, updated_at = ? WHERE id = ?",
-            (TaskStatus.PENDING, now, task_id),
+        cursor = self._conn.execute(
+            "UPDATE tasks SET status = ?, error = NULL, retries = 0, started_at = NULL, completed_at = NULL, updated_at = ? "
+            "WHERE id = ? AND status = ?",
+            (TaskStatus.PENDING.value, now, task_id, TaskStatus.FAILED.value),
         )
         self._conn.commit()
-        logger.info("Task manually retried: id=%d", task_id)
-        return self.get_task(task_id)
+        if cursor.rowcount == 1:
+            logger.info("Task manually retried: id=%d", task_id)
+            return self.get_task(task_id)
+        logger.warning("retry_task: task %d not found or not failed", task_id)
+        return None
 
     def recover_stale_tasks(self, timeout_minutes: int = 30) -> int:
         """Reset tasks stuck in in_progress for longer than timeout_minutes back to pending.
@@ -461,7 +465,7 @@ class TaskStore:
             ).fetchall()
         return [{"id": r["id"], "title": r["title"], "status": r["status"], "priority": r["priority"]} for r in rows], total
 
-    def cascade_cancel_dependents(self, task_id: int) -> int:
+    def cascade_cancel_dependents(self, task_id: int, _commit: bool = True) -> int:
         """Cancel all tasks that depend on the given task (directly or transitively).
 
         Only cancels tasks that are still in 'pending' status.
@@ -480,7 +484,8 @@ class TaskStore:
             (task_id, TaskStatus.CANCELLED.value, now, TaskStatus.PENDING.value),
         )
         count = cursor.rowcount
-        self._conn.commit()
+        if _commit:
+            self._conn.commit()
         if count > 0:
             logger.info(
                 "Cascade cancelled %d dependent tasks for task %d", count, task_id
