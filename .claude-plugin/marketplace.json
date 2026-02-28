@@ -1,18 +1,17 @@
 {
   "name": "initiative",
-  "description": "Local marketplace for the Initiative autonomous task orchestration plugin",
+  "description": "Initiative - Autonomous AI task orchestration for Claude Code",
   "owner": {
-    "name": "Ian McVann"
+    "name": "Initiative"
   },
   "plugins": [
     {
       "name": "initiative",
-      "description": "Autonomous AI task orchestration — never-stopping background worker",
+      "description": "Autonomous AI task orchestration — turns Claude into a never-stopping background worker that continuously pulls tasks from a priority queue, executes them, and generates new high-impact tasks automatically",
       "version": "0.1.0",
       "author": {
         "name": "Ian McVann"
       },
-      "source": "./plugins/initiative",
       "category": "productivity"
     }
   ]

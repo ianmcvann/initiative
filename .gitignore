@@ -1,1 +1,3 @@
 .claude/worktrees/
+.stfolder/
+__pycache__/

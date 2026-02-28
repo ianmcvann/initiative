@@ -15,35 +15,32 @@ When multiple tasks are pending, Initiative dispatches up to 3 parallel subagent
 
 ## Installation
 
-### As a Claude Code Plugin
-
 ```bash
-# Clone the repository
-git clone https://github.com/ianmcvann/initiative.git
+# Add the Initiative marketplace
+claude plugin marketplace add ianmcvann/initiative
 
-# Install the plugin in Claude Code
-claude plugin add ./initiative
+# Install Initiative plugin
+claude plugin install initiative@initiative
 ```
 
-### Manual Setup
+### Start working!
+
+```
+/initiative:start
+```
+
+### Manual Setup (Alternative)
+
+If you prefer manual installation:
 
 ```bash
 # Clone and install dependencies
 git clone https://github.com/ianmcvann/initiative.git
 cd initiative
 uv sync
-```
 
-Add the MCP server to your Claude Code configuration:
-
-```json
-{
-  "initiative": {
-    "type": "stdio",
-    "command": "uv",
-    "args": ["run", "--directory", "/path/to/initiative", "initiative"]
-  }
-}
+# Add as a Claude Code plugin
+claude plugin add ./initiative
 ```
 
 ## Usage

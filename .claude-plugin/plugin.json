@@ -6,7 +6,10 @@
     "name": "Ian McVann"
   },
   "license": "MIT",
-  "skills": "./skills/",
-  "commands": "./commands/",
-  "hooks": "./hooks/hooks.json"
+  "commands": "./.claude/commands/",
+  "skills": "./.claude/skills/",
+  "agents": [],
+  "hooks": [
+    "./.claude/hooks/session-start.json"
+  ]
 }
