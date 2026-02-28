@@ -1,0 +1,7 @@
+{
+  "initiative": {
+    "type": "stdio",
+    "command": "uv",
+    "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}", "initiative"]
+  }
+}

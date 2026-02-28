@@ -1,0 +1,12 @@
+{
+  "name": "initiative",
+  "description": "Autonomous AI task orchestration — never-stopping background worker",
+  "version": "0.1.0",
+  "author": {
+    "name": "Ian McVann"
+  },
+  "license": "MIT",
+  "skills": "./skills/",
+  "commands": "./commands/",
+  "hooks": "./hooks/hooks.json"
+}
