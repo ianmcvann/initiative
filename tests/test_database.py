@@ -315,13 +315,33 @@ def test_dependency_on_nonexistent_task_raises(store):
 
 def test_circular_dependency_detected(store):
     """Circular dependency chains are detected and rejected."""
-    # Create A -> B chain
+    # Build chain: A <- B <- C  (C depends on B, B depends on A)
     a_id = store.add_task("Task A", "desc")
     b_id = store.add_task("Task B", "desc", depends_on=[a_id])
-    # Now try to create C that depends on B, and also make A depend on C (cycle)
-    # First verify simple chain works
     c_id = store.add_task("Task C", "desc", depends_on=[b_id])
-    assert c_id is not None
+    assert c_id is not None  # linear chain is fine
+
+    # To create a cycle that add_task can detect, we need the new task's ID
+    # to appear among the ancestors of one of its deps.  Since the task is
+    # brand-new, we predict its ID and inject a back-edge before calling add_task.
+    next_id_row = store._conn.execute(
+        "SELECT MAX(id) + 1 as nid FROM tasks"
+    ).fetchone()
+    future_id = next_id_row["nid"]
+
+    # Temporarily disable FK constraints so we can reference the not-yet-existing task.
+    store._conn.execute("PRAGMA foreign_keys=OFF")
+    store._conn.execute(
+        "INSERT INTO task_dependencies (task_id, depends_on_id) VALUES (?, ?)",
+        (a_id, future_id),
+    )
+    store._conn.commit()
+    store._conn.execute("PRAGMA foreign_keys=ON")
+
+    # Now add_task for future_id with depends_on=[b_id].
+    # Ancestor walk: b_id -> a_id -> future_id (the new task itself) => cycle!
+    with pytest.raises(ValueError, match="Circular dependency"):
+        store.add_task("Task D", "desc", depends_on=[b_id])
 
 
 def test_foreign_keys_enabled(store):

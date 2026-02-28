@@ -128,10 +128,6 @@ class TaskStore:
         tags: list[str] | None = None,
         _commit: bool = True,
     ) -> int:
-        if depends_on:
-            for dep_id in depends_on:
-                if self._would_create_cycle(dep_id, set()):
-                    raise ValueError(f"Circular dependency detected: task {dep_id} would create a cycle")
         now = datetime.now(timezone.utc).isoformat()
         cursor = self._conn.execute(
             "INSERT INTO tasks (title, description, priority, max_retries, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -144,6 +140,23 @@ class TaskStore:
                     "INSERT INTO task_dependencies (task_id, depends_on_id) VALUES (?, ?)",
                     (task_id, dep_id),
                 )
+            # Cycle detection: walk ancestors of the new task via recursive CTE.
+            # If the new task_id appears among its own ancestors, there is a cycle.
+            for dep_id in depends_on:
+                has_cycle = self._conn.execute(
+                    """WITH RECURSIVE ancestors(id) AS (
+                        SELECT depends_on_id FROM task_dependencies WHERE task_id = ?
+                        UNION ALL
+                        SELECT d.depends_on_id FROM task_dependencies d JOIN ancestors a ON d.task_id = a.id
+                    )
+                    SELECT 1 FROM ancestors WHERE id = ? LIMIT 1""",
+                    (dep_id, task_id),
+                ).fetchone()
+                if has_cycle:
+                    self._conn.rollback()
+                    raise ValueError(
+                        f"Circular dependency detected: task {dep_id} would create a cycle"
+                    )
         if tags:
             for tag in tags:
                 self._conn.execute(
@@ -155,20 +168,6 @@ class TaskStore:
         logger.info("Task added: id=%d title=%r depends_on=%s tags=%s", task_id, title, depends_on, tags)
         return task_id
 
-    def _would_create_cycle(self, task_id: int, visited: set[int]) -> bool:
-        """Check if adding a dependency on task_id would create a cycle."""
-        if task_id in visited:
-            return True
-        visited.add(task_id)
-        rows = self._conn.execute(
-            "SELECT depends_on_id FROM task_dependencies WHERE task_id = ?",
-            (task_id,),
-        ).fetchall()
-        for row in rows:
-            if self._would_create_cycle(row["depends_on_id"], visited):
-                return True
-        return False
-
     def get_task(self, task_id: int) -> Task | None:
         row = self._conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
         if row is None:
@@ -176,8 +175,7 @@ class TaskStore:
         return self._row_to_task(row)
 
     def get_next_task(self) -> Task | None:
-        self._conn.execute("BEGIN IMMEDIATE")
-        try:
+        with self.transaction():
             row = self._conn.execute(
                 """SELECT t.* FROM tasks t
                 WHERE t.status = ?
@@ -190,7 +188,6 @@ class TaskStore:
                 (TaskStatus.PENDING, TaskStatus.COMPLETED),
             ).fetchone()
             if row is None:
-                self._conn.execute("ROLLBACK")
                 logger.debug("No pending tasks available")
                 return None
             now = datetime.now(timezone.utc).isoformat()
@@ -198,10 +195,6 @@ class TaskStore:
                 "UPDATE tasks SET status = ?, started_at = ?, updated_at = ? WHERE id = ?",
                 (TaskStatus.IN_PROGRESS, now, now, row["id"]),
             )
-            self._conn.execute("COMMIT")
-        except Exception:
-            self._conn.execute("ROLLBACK")
-            raise
         task = self._row_to_task(row)
         task.status = TaskStatus.IN_PROGRESS
         task.started_at = datetime.fromisoformat(now)
