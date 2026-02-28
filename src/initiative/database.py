@@ -248,11 +248,8 @@ class TaskStore:
             logger.info("Task permanently failed: id=%d", task_id)
             return self.get_task(task_id)
         # Neither matched: task not found or not in_progress
-        task = self.get_task(task_id)
-        if task is None:
-            return None
-        logger.warning("fail_task: task %d is %s, not in_progress", task_id, task.status)
-        return task
+        logger.warning("fail_task: task %d not found or not in_progress", task_id)
+        return None
 
     def cancel_task(self, task_id: int, _commit: bool = True) -> bool:
         """Cancel a pending or in_progress task. Returns True on success, False if task not found or already completed/failed/cancelled.
@@ -487,26 +484,8 @@ class TaskStore:
         return datetime.fromisoformat(value) if value else None
 
     def _row_to_task(self, row: sqlite3.Row) -> Task:
-        """Convert a single row to a Task (makes 2 extra queries for tags/deps)."""
-        task_id = row["id"]
-        return Task(
-            id=task_id,
-            title=row["title"],
-            description=row["description"],
-            status=TaskStatus(row["status"]),
-            priority=row["priority"],
-            worker_id=row["worker_id"],
-            result=row["result"],
-            error=row["error"],
-            retries=row["retries"],
-            max_retries=row["max_retries"],
-            blocked_by=self.get_blocked_by(task_id),
-            tags=self.get_tags(task_id),
-            started_at=self._parse_optional_dt(row["started_at"]),
-            completed_at=self._parse_optional_dt(row["completed_at"]),
-            created_at=datetime.fromisoformat(row["created_at"]),
-            updated_at=datetime.fromisoformat(row["updated_at"]),
-        )
+        """Convert a single row to a Task, delegating to batch method."""
+        return self._batch_rows_to_tasks([row])[0]
 
     def _batch_rows_to_tasks(self, rows: list[sqlite3.Row]) -> list[Task]:
         """Convert multiple rows to Tasks using batch queries (3 queries total)."""

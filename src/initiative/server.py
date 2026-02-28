@@ -121,13 +121,13 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
         if err:
             return json.dumps({"error": err, "task_id": task_id})
         logger.info("fail_task called: task_id=%d", task_id)
-        # Check current status before attempting fail
-        current = store.get_task(task_id)
-        if current is None:
-            return json.dumps({"error": "Task not found", "task_id": task_id})
-        if current.status != TaskStatus.IN_PROGRESS:
-            return json.dumps({"error": f"Task is {current.status}, not in_progress", "task_id": task_id, "status": str(current.status)})
         task = store.fail_task(task_id, error)
+        if task is None:
+            # Atomic UPDATE didn't match — figure out why
+            existing = store.get_task(task_id)
+            if existing is None:
+                return json.dumps({"error": "Task not found", "task_id": task_id})
+            return json.dumps({"error": f"Task is {existing.status}, not in_progress", "task_id": task_id, "status": str(existing.status)})
         if task.status == TaskStatus.PENDING:
             return json.dumps({
                 "task_id": task_id,
@@ -157,22 +157,21 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
         if err:
             return json.dumps({"error": err, "task_id": task_id})
         logger.info("cancel_task called: task_id=%d", task_id)
-        current = store.get_task(task_id)
-        if current is None:
-            return json.dumps({"error": "Task not found", "task_id": task_id})
-        if current.status not in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS):
-            return json.dumps({
-                "error": f"Task is {current.status}, cannot cancel",
-                "task_id": task_id,
-                "status": str(current.status),
-            })
         success = store.cancel_task(task_id)
-        if not success:
-            return json.dumps({"error": "Failed to cancel task", "task_id": task_id})
+        if success:
+            return json.dumps({
+                "task_id": task_id,
+                "status": "cancelled",
+                "message": "Task has been cancelled",
+            })
+        # Atomic UPDATE didn't match — figure out why
+        task = store.get_task(task_id)
+        if task is None:
+            return json.dumps({"error": "Task not found", "task_id": task_id})
         return json.dumps({
+            "error": f"Task is {task.status}, cannot cancel",
             "task_id": task_id,
-            "status": "cancelled",
-            "message": "Task has been cancelled",
+            "status": str(task.status),
         })
 
     @mcp.tool()
@@ -210,18 +209,17 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
         if title is None and description is None and priority is None:
             return json.dumps({"error": "At least one field (title, description, priority) must be provided"})
         logger.info("update_task called: task_id=%d", task_id)
-        current = store.get_task(task_id)
-        if current is None:
-            return json.dumps({"error": "Task not found", "task_id": task_id})
-        if current.status != TaskStatus.PENDING:
-            return json.dumps({
-                "error": f"Task is {current.status}, only pending tasks can be updated",
-                "task_id": task_id,
-                "status": str(current.status),
-            })
         task = store.update_task(task_id, title=title, description=description, priority=priority)
         if task is None:
-            return json.dumps({"error": "Failed to update task", "task_id": task_id})
+            # update_task returns None for not found or not pending
+            existing = store.get_task(task_id)
+            if existing is None:
+                return json.dumps({"error": "Task not found", "task_id": task_id})
+            return json.dumps({
+                "error": f"Task is {existing.status}, only pending tasks can be updated",
+                "task_id": task_id,
+                "status": str(existing.status),
+            })
         return json.dumps(task.to_dict())
 
     @mcp.tool()

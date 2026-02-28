@@ -9,6 +9,26 @@ def store(tmp_path):
     return TaskStore(str(db_path))
 
 
+def test_transaction_commits_on_success(store):
+    """Transaction context manager commits mutations on normal exit."""
+    task_id = store.add_task("Parent", "desc")
+    with store.transaction():
+        store.add_tag(task_id, "test-tag", _commit=False)
+    tags = store.get_tags(task_id)
+    assert "test-tag" in tags
+
+
+def test_transaction_rollback_on_exception(store):
+    """Transaction context manager rolls back mutations on exception."""
+    task_id = store.add_task("Task", "desc")
+    with pytest.raises(RuntimeError):
+        with store.transaction():
+            store.add_tag(task_id, "will-be-rolled-back", _commit=False)
+            raise RuntimeError("intentional failure")
+    tags = store.get_tags(task_id)
+    assert "will-be-rolled-back" not in tags
+
+
 def test_add_and_get_task(store):
     task_id = store.add_task("Fix bug", "Fix the auth bug", priority=5)
     task = store.get_task(task_id)
@@ -505,20 +525,32 @@ def test_complete_task_returns_false_for_already_completed(store):
     assert store.complete_task(task_id) is False
 
 
-def test_fail_task_returns_unchanged_for_pending(store):
-    """fail_task on a pending task returns it unchanged."""
+def test_fail_task_returns_none_for_pending(store):
+    """fail_task on a pending task returns None (not in_progress)."""
     task_id = store.add_task("Task", "desc")
-    task = store.fail_task(task_id, error="nope")
+    result = store.fail_task(task_id, error="nope")
+    assert result is None
+    # Task should be unchanged
+    task = store.get_task(task_id)
     assert task.status == TaskStatus.PENDING
-    assert task.error is None  # unchanged
+    assert task.error is None
 
 
-def test_fail_task_returns_unchanged_for_completed(store):
-    """fail_task on a completed task returns it unchanged."""
+def test_fail_task_returns_none_for_nonexistent(store):
+    """fail_task on a nonexistent task returns None."""
+    result = store.fail_task(9999, error="nope")
+    assert result is None
+
+
+def test_fail_task_returns_none_for_completed(store):
+    """fail_task on a completed task returns None (not in_progress)."""
     task_id = store.add_task("Task", "desc")
     store.get_next_task()
     store.complete_task(task_id)
-    task = store.fail_task(task_id, error="nope")
+    result = store.fail_task(task_id, error="nope")
+    assert result is None
+    # Task should be unchanged
+    task = store.get_task(task_id)
     assert task.status == TaskStatus.COMPLETED
 
 

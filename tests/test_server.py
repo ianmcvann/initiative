@@ -210,6 +210,48 @@ async def test_add_tag_tool(server):
 
 
 @pytest.mark.anyio
+async def test_add_tag_empty_string_rejected(server):
+    """add_tag rejects an empty string tag."""
+    add_data = await call_tool(server, "add_task", {"title": "Task", "description": "d"})
+    task_id = add_data["task_id"]
+    data = await call_tool(server, "add_tag", {"task_id": task_id, "tag": ""})
+    assert "error" in data
+    assert "empty" in data["error"]
+
+
+@pytest.mark.anyio
+async def test_add_tag_whitespace_only_rejected(server):
+    """add_tag rejects a whitespace-only tag."""
+    add_data = await call_tool(server, "add_task", {"title": "Task", "description": "d"})
+    task_id = add_data["task_id"]
+    data = await call_tool(server, "add_tag", {"task_id": task_id, "tag": "   "})
+    assert "error" in data
+    assert "empty" in data["error"]
+
+
+@pytest.mark.anyio
+async def test_add_tag_too_long_rejected(server):
+    """add_tag rejects a tag longer than 100 characters."""
+    add_data = await call_tool(server, "add_task", {"title": "Task", "description": "d"})
+    task_id = add_data["task_id"]
+    data = await call_tool(server, "add_tag", {"task_id": task_id, "tag": "x" * 101})
+    assert "error" in data
+    assert "100 characters" in data["error"]
+
+
+@pytest.mark.anyio
+async def test_add_tag_strips_whitespace(server):
+    """add_tag strips leading/trailing whitespace from tag."""
+    add_data = await call_tool(server, "add_task", {"title": "Task", "description": "d"})
+    task_id = add_data["task_id"]
+    data = await call_tool(server, "add_tag", {"task_id": task_id, "tag": "  bug  "})
+    assert data["tag"] == "bug"
+    # Verify the stored tag is stripped
+    tasks = await call_tool(server, "list_tasks")
+    assert "bug" in tasks["tasks"][0]["tags"]
+
+
+@pytest.mark.anyio
 async def test_add_tag_task_not_found(server):
     """add_tag on a non-existent task returns an error."""
     data = await call_tool(server, "add_tag", {"task_id": 999, "tag": "bug"})
@@ -664,3 +706,46 @@ async def test_decompose_task_too_few_subtasks(server):
         "subtasks": [{"title": "A", "description": "a"}],
     })
     assert "error" in data
+
+
+@pytest.mark.anyio
+async def test_decompose_subtask_title_too_long(server):
+    """decompose_task rejects subtask with title over 1000 chars."""
+    parent = await call_tool(server, "add_task", {"title": "Parent", "description": "d"})
+    data = await call_tool(server, "decompose_task", {
+        "task_id": parent["task_id"],
+        "subtasks": [
+            {"title": "x" * 1001, "description": "a"},
+            {"title": "Step 2", "description": "b"},
+        ],
+    })
+    assert "error" in data
+    assert "1000 characters" in data["error"]
+
+
+@pytest.mark.anyio
+async def test_decompose_subtask_priority_out_of_range(server):
+    """decompose_task rejects subtask with priority outside 0-1000."""
+    parent = await call_tool(server, "add_task", {"title": "Parent", "description": "d"})
+    # Test negative priority
+    data = await call_tool(server, "decompose_task", {
+        "task_id": parent["task_id"],
+        "subtasks": [
+            {"title": "Step 1", "description": "a", "priority": -1},
+            {"title": "Step 2", "description": "b"},
+        ],
+    })
+    assert "error" in data
+    assert "priority" in data["error"].lower()
+
+    # Test priority too high
+    parent2 = await call_tool(server, "add_task", {"title": "Parent2", "description": "d"})
+    data = await call_tool(server, "decompose_task", {
+        "task_id": parent2["task_id"],
+        "subtasks": [
+            {"title": "Step 1", "description": "a", "priority": 1001},
+            {"title": "Step 2", "description": "b"},
+        ],
+    })
+    assert "error" in data
+    assert "priority" in data["error"].lower()
