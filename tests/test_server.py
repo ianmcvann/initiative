@@ -382,3 +382,54 @@ async def test_fail_task_not_in_progress(server):
     data = await call_tool(server, "fail_task", {"task_id": add_data["task_id"]})
     assert "error" in data
     assert "not in_progress" in data["error"]
+
+
+@pytest.mark.anyio
+async def test_list_tasks_pagination(server):
+    """list_tasks supports pagination."""
+    for i in range(5):
+        await call_tool(server, "add_task", {"title": f"T{i}", "description": "d"})
+    data = await call_tool(server, "list_tasks", {"limit": 2, "offset": 0})
+    assert data["count"] == 2
+    assert data["total"] == 5
+    assert data["has_more"] is True
+    assert data["limit"] == 2
+    assert data["offset"] == 0
+
+
+@pytest.mark.anyio
+async def test_list_tasks_pagination_last_page(server):
+    """list_tasks pagination on last page."""
+    for i in range(3):
+        await call_tool(server, "add_task", {"title": f"T{i}", "description": "d"})
+    data = await call_tool(server, "list_tasks", {"limit": 2, "offset": 2})
+    assert data["count"] == 1
+    assert data["total"] == 3
+    assert data["has_more"] is False
+
+
+@pytest.mark.anyio
+async def test_list_tasks_invalid_limit(server):
+    """list_tasks rejects invalid limit."""
+    data = await call_tool(server, "list_tasks", {"limit": 0})
+    assert "error" in data
+    data = await call_tool(server, "list_tasks", {"limit": 201})
+    assert "error" in data
+
+
+@pytest.mark.anyio
+async def test_list_tasks_invalid_offset(server):
+    """list_tasks rejects negative offset."""
+    data = await call_tool(server, "list_tasks", {"offset": -1})
+    assert "error" in data
+
+
+@pytest.mark.anyio
+async def test_get_summary_pagination(server):
+    """get_summary supports pagination."""
+    for i in range(5):
+        await call_tool(server, "add_task", {"title": f"T{i}", "description": "d"})
+    data = await call_tool(server, "get_summary", {"limit": 3})
+    assert data["count"] == 3
+    assert data["total"] == 5
+    assert data["has_more"] is True

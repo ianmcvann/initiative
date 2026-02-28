@@ -220,27 +220,44 @@ class TaskStore:
         logger.info("Task manually retried: id=%d", task_id)
         return self.get_task(task_id)
 
-    def list_tasks(self, status: TaskStatus | None = None, tag: str | None = None) -> list[Task]:
-        query = "SELECT t.* FROM tasks t"
+    def _build_filter_query(
+        self, select: str, status: TaskStatus | None, tag: str | None
+    ) -> tuple[str, list]:
+        """Build a filtered query with optional status and tag conditions."""
+        query = select
         params: list = []
         conditions: list[str] = []
-
         if tag is not None:
             query += " JOIN task_tags tt ON tt.task_id = t.id"
             conditions.append("tt.tag = ?")
             params.append(tag)
-
         if status is not None:
             conditions.append("t.status = ?")
             params.append(str(status))
-
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
+        return query, params
 
-        query += " ORDER BY t.priority DESC, t.created_at ASC"
+    def list_tasks(
+        self,
+        status: TaskStatus | None = None,
+        tag: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[Task], int]:
+        """Return tasks with pagination. Returns (tasks, total_count)."""
+        # Count query
+        count_query, count_params = self._build_filter_query(
+            "SELECT COUNT(*) as cnt FROM tasks t", status, tag
+        )
+        total = self._conn.execute(count_query, count_params).fetchone()["cnt"]
 
+        # Data query
+        query, params = self._build_filter_query("SELECT t.* FROM tasks t", status, tag)
+        query += " ORDER BY t.priority DESC, t.created_at ASC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
         rows = self._conn.execute(query, params).fetchall()
-        return self._batch_rows_to_tasks(rows)
+        return self._batch_rows_to_tasks(rows), total
 
     def get_status(self) -> dict:
         rows = self._conn.execute(
@@ -288,18 +305,28 @@ class TaskStore:
             "oldest_pending_task_age_seconds": oldest_pending_age,
         }
 
-    def get_summary(self, status: TaskStatus | None = None) -> list[dict]:
-        """Return lightweight task summaries (id, title, status, priority only)."""
+    def get_summary(
+        self,
+        status: TaskStatus | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """Return lightweight task summaries with pagination. Returns (summaries, total_count)."""
         if status is not None:
+            total = self._conn.execute(
+                "SELECT COUNT(*) as cnt FROM tasks WHERE status = ?", (str(status),)
+            ).fetchone()["cnt"]
             rows = self._conn.execute(
-                "SELECT id, title, status, priority FROM tasks WHERE status = ? ORDER BY priority DESC, created_at ASC",
-                (str(status),),
+                "SELECT id, title, status, priority FROM tasks WHERE status = ? ORDER BY priority DESC, created_at ASC LIMIT ? OFFSET ?",
+                (str(status), limit, offset),
             ).fetchall()
         else:
+            total = self._conn.execute("SELECT COUNT(*) as cnt FROM tasks").fetchone()["cnt"]
             rows = self._conn.execute(
-                "SELECT id, title, status, priority FROM tasks ORDER BY priority DESC, created_at ASC"
+                "SELECT id, title, status, priority FROM tasks ORDER BY priority DESC, created_at ASC LIMIT ? OFFSET ?",
+                (limit, offset),
             ).fetchall()
-        return [{"id": r["id"], "title": r["title"], "status": r["status"], "priority": r["priority"]} for r in rows]
+        return [{"id": r["id"], "title": r["title"], "status": r["status"], "priority": r["priority"]} for r in rows], total
 
     def get_blocked_by(self, task_id: int) -> list[int]:
         """Return IDs of uncompleted tasks that this task depends on."""

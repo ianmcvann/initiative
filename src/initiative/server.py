@@ -205,21 +205,39 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
         return json.dumps({"task_id": task_id, "tag": tag, "message": "Tag removed"})
 
     @mcp.tool()
-    async def list_tasks(status: Optional[str] = None, tag: Optional[str] = None) -> str:
+    async def list_tasks(
+        status: Optional[str] = None,
+        tag: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> str:
         """List tasks, optionally filtered by status and/or tag.
 
         Args:
             status: Filter by status (pending, in_progress, completed, failed). Omit for all.
             tag: Filter by tag. Only tasks with this tag will be returned.
+            limit: Maximum number of tasks to return (1-200, default 50).
+            offset: Number of tasks to skip (default 0).
         """
-        logger.info("list_tasks called: status=%r tag=%r", status, tag)
+        logger.info("list_tasks called: status=%r tag=%r limit=%d offset=%d", status, tag, limit, offset)
+        if not 1 <= limit <= 200:
+            return json.dumps({"error": "limit must be between 1 and 200"})
+        if offset < 0:
+            return json.dumps({"error": "offset must be >= 0"})
         try:
             task_status = TaskStatus(status) if status else None
         except ValueError:
             valid = ", ".join(str(s) for s in TaskStatus)
             return json.dumps({"error": f"Invalid status. Must be one of: {valid}"})
-        tasks = store.list_tasks(status=task_status, tag=tag)
-        return json.dumps({"tasks": [t.to_dict() for t in tasks], "count": len(tasks)})
+        tasks, total = store.list_tasks(status=task_status, tag=tag, limit=limit, offset=offset)
+        return json.dumps({
+            "tasks": [t.to_dict() for t in tasks],
+            "count": len(tasks),
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(tasks) < total,
+        })
 
     @mcp.tool()
     async def get_status() -> str:
@@ -228,21 +246,38 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
         return json.dumps(store.get_status())
 
     @mcp.tool()
-    async def get_summary(status: Optional[str] = None) -> str:
+    async def get_summary(
+        status: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> str:
         """Get a lightweight summary of tasks (id, title, status, priority only).
         Use this instead of list_tasks when you only need an overview to save context.
 
         Args:
             status: Filter by status (pending, in_progress, completed, failed). Omit for all.
+            limit: Maximum number of tasks to return (1-200, default 50).
+            offset: Number of tasks to skip (default 0).
         """
-        logger.info("get_summary called: status=%r", status)
+        logger.info("get_summary called: status=%r limit=%d offset=%d", status, limit, offset)
+        if not 1 <= limit <= 200:
+            return json.dumps({"error": "limit must be between 1 and 200"})
+        if offset < 0:
+            return json.dumps({"error": "offset must be >= 0"})
         try:
             task_status = TaskStatus(status) if status else None
         except ValueError:
             valid = ", ".join(str(s) for s in TaskStatus)
             return json.dumps({"error": f"Invalid status. Must be one of: {valid}"})
-        tasks = store.get_summary(status=task_status)
-        return json.dumps({"tasks": tasks, "count": len(tasks)})
+        tasks, total = store.get_summary(status=task_status, limit=limit, offset=offset)
+        return json.dumps({
+            "tasks": tasks,
+            "count": len(tasks),
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(tasks) < total,
+        })
 
     return mcp
 

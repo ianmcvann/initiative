@@ -55,8 +55,8 @@ def test_list_tasks_by_status(store):
     task_id = store.add_task("Task 3", "desc")
     store.get_next_task()  # moves highest to in_progress
 
-    pending = store.list_tasks(status=TaskStatus.PENDING)
-    in_progress = store.list_tasks(status=TaskStatus.IN_PROGRESS)
+    pending, pending_total = store.list_tasks(status=TaskStatus.PENDING)
+    in_progress, ip_total = store.list_tasks(status=TaskStatus.IN_PROGRESS)
     assert len(pending) == 2
     assert len(in_progress) == 1
 
@@ -64,8 +64,9 @@ def test_list_tasks_by_status(store):
 def test_list_tasks_all(store):
     store.add_task("Task 1", "desc")
     store.add_task("Task 2", "desc")
-    all_tasks = store.list_tasks()
+    all_tasks, total = store.list_tasks()
     assert len(all_tasks) == 2
+    assert total == 2
 
 
 def test_get_status(store):
@@ -271,13 +272,13 @@ def test_list_tasks_filtered_by_tag(store):
     store.add_task("Feature task", "desc", tags=["feature"])
     store.add_task("Both task", "desc", tags=["bug", "feature"])
 
-    bug_tasks = store.list_tasks(tag="bug")
+    bug_tasks, bug_total = store.list_tasks(tag="bug")
     assert len(bug_tasks) == 2
     titles = [t.title for t in bug_tasks]
     assert "Bug task" in titles
     assert "Both task" in titles
 
-    feature_tasks = store.list_tasks(tag="feature")
+    feature_tasks, feat_total = store.list_tasks(tag="feature")
     assert len(feature_tasks) == 2
     titles = [t.title for t in feature_tasks]
     assert "Feature task" in titles
@@ -291,7 +292,7 @@ def test_list_tasks_filtered_by_tag_and_status(store):
     store.add_task("Feature pending", "desc", tags=["feature"])
     store.get_next_task()  # moves highest priority (Bug in-progress) to in_progress
 
-    pending_bugs = store.list_tasks(status=TaskStatus.PENDING, tag="bug")
+    pending_bugs, total = store.list_tasks(status=TaskStatus.PENDING, tag="bug")
     assert len(pending_bugs) == 1
     assert pending_bugs[0].title == "Bug pending"
 
@@ -300,8 +301,9 @@ def test_list_tasks_no_tag_filter_returns_all(store):
     """list_tasks without tag filter returns all tasks."""
     store.add_task("Task 1", "desc", tags=["bug"])
     store.add_task("Task 2", "desc")
-    all_tasks = store.list_tasks()
+    all_tasks, total = store.list_tasks()
     assert len(all_tasks) == 2
+    assert total == 2
 
 
 def test_dependency_on_nonexistent_task_raises(store):
@@ -437,8 +439,9 @@ def test_get_summary_all(store):
     """get_summary returns lightweight task info."""
     store.add_task("Task 1", "long description here", priority=5)
     store.add_task("Task 2", "another long description", priority=10)
-    summaries = store.get_summary()
+    summaries, total = store.get_summary()
     assert len(summaries) == 2
+    assert total == 2
     # Should be ordered by priority DESC
     assert summaries[0]["title"] == "Task 2"
     assert summaries[0]["priority"] == 10
@@ -452,10 +455,10 @@ def test_get_summary_filtered(store):
     task_id = store.add_task("Will complete", "desc", priority=10)
     store.get_next_task()
     store.complete_task(task_id)
-    pending = store.get_summary(status=TaskStatus.PENDING)
+    pending, p_total = store.get_summary(status=TaskStatus.PENDING)
     assert len(pending) == 1
     assert pending[0]["title"] == "Pending"
-    completed = store.get_summary(status=TaskStatus.COMPLETED)
+    completed, c_total = store.get_summary(status=TaskStatus.COMPLETED)
     assert len(completed) == 1
     assert completed[0]["title"] == "Will complete"
 
@@ -511,3 +514,38 @@ def test_retry_task_resets_completed_at(store):
     assert task.completed_at is None
     assert task.started_at is None
     assert task.status == TaskStatus.PENDING
+
+
+def test_list_tasks_pagination(store):
+    """list_tasks supports limit and offset."""
+    for i in range(5):
+        store.add_task(f"Task {i}", "desc")
+    tasks, total = store.list_tasks(limit=2, offset=0)
+    assert len(tasks) == 2
+    assert total == 5
+    tasks2, total2 = store.list_tasks(limit=2, offset=2)
+    assert len(tasks2) == 2
+    assert total2 == 5
+    tasks3, total3 = store.list_tasks(limit=2, offset=4)
+    assert len(tasks3) == 1
+    assert total3 == 5
+
+
+def test_list_tasks_pagination_offset_beyond_total(store):
+    """list_tasks with offset beyond total returns empty."""
+    store.add_task("Task", "desc")
+    tasks, total = store.list_tasks(limit=10, offset=100)
+    assert len(tasks) == 0
+    assert total == 1
+
+
+def test_get_summary_pagination(store):
+    """get_summary supports limit and offset."""
+    for i in range(5):
+        store.add_task(f"Task {i}", "desc")
+    summaries, total = store.get_summary(limit=3, offset=0)
+    assert len(summaries) == 3
+    assert total == 5
+    summaries2, total2 = store.get_summary(limit=3, offset=3)
+    assert len(summaries2) == 2
+    assert total2 == 5
