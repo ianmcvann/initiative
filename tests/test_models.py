@@ -15,6 +15,7 @@ def test_task_creation_defaults():
     assert task.retries == 0
     assert task.max_retries == 2
     assert task.blocked_by == []
+    assert task.tags == []
     assert isinstance(task.created_at, datetime)
 
 
@@ -97,3 +98,55 @@ def test_task_from_dict_with_retries():
     task = Task.from_dict(data)
     assert task.retries == 1
     assert task.max_retries == 3
+
+
+def test_task_creation_with_tags():
+    task = Task(title="Tagged task", description="desc", tags=["bug", "urgent"])
+    assert task.tags == ["bug", "urgent"]
+
+
+def test_task_to_dict_includes_tags():
+    task = Task(id=1, title="Tagged", description="desc", tags=["frontend", "p0"])
+    d = task.to_dict()
+    assert d["tags"] == ["frontend", "p0"]
+
+
+def test_task_to_dict_empty_tags():
+    task = Task(id=1, title="No tags", description="desc")
+    d = task.to_dict()
+    assert d["tags"] == []
+
+
+def test_task_from_dict_with_tags():
+    data = {
+        "id": 1,
+        "title": "Tagged task",
+        "description": "desc",
+        "status": "pending",
+        "priority": 0,
+        "worker_id": None,
+        "result": None,
+        "error": None,
+        "tags": ["bug", "backend"],
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    task = Task.from_dict(data)
+    assert task.tags == ["bug", "backend"]
+
+
+def test_task_from_dict_without_tags():
+    data = {
+        "id": 1,
+        "title": "No tags",
+        "description": "desc",
+        "status": "pending",
+        "priority": 0,
+        "worker_id": None,
+        "result": None,
+        "error": None,
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    task = Task.from_dict(data)
+    assert task.tags == []

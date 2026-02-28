@@ -34,6 +34,13 @@ CREATE TABLE IF NOT EXISTS task_dependencies (
     FOREIGN KEY (task_id) REFERENCES tasks(id),
     FOREIGN KEY (depends_on_id) REFERENCES tasks(id)
 );
+
+CREATE TABLE IF NOT EXISTS task_tags (
+    task_id INTEGER,
+    tag TEXT,
+    PRIMARY KEY (task_id, tag),
+    FOREIGN KEY (task_id) REFERENCES tasks(id)
+);
 """
 
 
@@ -53,6 +60,7 @@ class TaskStore:
         priority: int = 0,
         max_retries: int = 2,
         depends_on: list[int] | None = None,
+        tags: list[str] | None = None,
     ) -> int:
         now = datetime.now(timezone.utc).isoformat()
         cursor = self._conn.execute(
@@ -66,8 +74,14 @@ class TaskStore:
                     "INSERT INTO task_dependencies (task_id, depends_on_id) VALUES (?, ?)",
                     (task_id, dep_id),
                 )
+        if tags:
+            for tag in tags:
+                self._conn.execute(
+                    "INSERT INTO task_tags (task_id, tag) VALUES (?, ?)",
+                    (task_id, tag),
+                )
         self._conn.commit()
-        logger.info("Task added: id=%d title=%r depends_on=%s", task_id, title, depends_on)
+        logger.info("Task added: id=%d title=%r depends_on=%s tags=%s", task_id, title, depends_on, tags)
         return task_id
 
     def get_task(self, task_id: int) -> Task | None:
@@ -150,16 +164,26 @@ class TaskStore:
         logger.info("Task manually retried: id=%d", task_id)
         return self.get_task(task_id)
 
-    def list_tasks(self, status: TaskStatus | None = None) -> list[Task]:
+    def list_tasks(self, status: TaskStatus | None = None, tag: str | None = None) -> list[Task]:
+        query = "SELECT t.* FROM tasks t"
+        params: list = []
+        conditions: list[str] = []
+
+        if tag is not None:
+            query += " JOIN task_tags tt ON tt.task_id = t.id"
+            conditions.append("tt.tag = ?")
+            params.append(tag)
+
         if status is not None:
-            rows = self._conn.execute(
-                "SELECT * FROM tasks WHERE status = ? ORDER BY priority DESC, created_at ASC",
-                (str(status),),
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT * FROM tasks ORDER BY priority DESC, created_at ASC"
-            ).fetchall()
+            conditions.append("t.status = ?")
+            params.append(str(status))
+
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+
+        query += " ORDER BY t.priority DESC, t.created_at ASC"
+
+        rows = self._conn.execute(query, params).fetchall()
         return [self._row_to_task(row) for row in rows]
 
     def get_status(self) -> dict:
@@ -184,6 +208,32 @@ class TaskStore:
         ).fetchall()
         return [row["depends_on_id"] for row in rows]
 
+    def add_tag(self, task_id: int, tag: str) -> None:
+        """Add a tag to a task."""
+        self._conn.execute(
+            "INSERT OR IGNORE INTO task_tags (task_id, tag) VALUES (?, ?)",
+            (task_id, tag),
+        )
+        self._conn.commit()
+        logger.info("Tag added: task_id=%d tag=%r", task_id, tag)
+
+    def remove_tag(self, task_id: int, tag: str) -> None:
+        """Remove a tag from a task."""
+        self._conn.execute(
+            "DELETE FROM task_tags WHERE task_id = ? AND tag = ?",
+            (task_id, tag),
+        )
+        self._conn.commit()
+        logger.info("Tag removed: task_id=%d tag=%r", task_id, tag)
+
+    def get_tags(self, task_id: int) -> list[str]:
+        """Return list of tag strings for a task."""
+        rows = self._conn.execute(
+            "SELECT tag FROM task_tags WHERE task_id = ? ORDER BY tag",
+            (task_id,),
+        ).fetchall()
+        return [row["tag"] for row in rows]
+
     def _row_to_task(self, row: sqlite3.Row) -> Task:
         task_id = row["id"]
         return Task(
@@ -198,6 +248,7 @@ class TaskStore:
             retries=row["retries"],
             max_retries=row["max_retries"],
             blocked_by=self.get_blocked_by(task_id),
+            tags=self.get_tags(task_id),
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )

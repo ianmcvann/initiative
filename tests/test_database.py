@@ -205,3 +205,100 @@ def test_task_with_no_dependencies_has_empty_blocked_by(store):
     task_id = store.add_task("Simple", "desc")
     task = store.get_task(task_id)
     assert task.blocked_by == []
+
+
+def test_add_tag(store):
+    """Tags can be added to a task."""
+    task_id = store.add_task("Taggable", "desc")
+    store.add_tag(task_id, "bug")
+    store.add_tag(task_id, "urgent")
+    tags = store.get_tags(task_id)
+    assert "bug" in tags
+    assert "urgent" in tags
+
+
+def test_add_tag_idempotent(store):
+    """Adding the same tag twice does not duplicate it."""
+    task_id = store.add_task("Taggable", "desc")
+    store.add_tag(task_id, "bug")
+    store.add_tag(task_id, "bug")
+    tags = store.get_tags(task_id)
+    assert tags.count("bug") == 1
+
+
+def test_remove_tag(store):
+    """Tags can be removed from a task."""
+    task_id = store.add_task("Taggable", "desc")
+    store.add_tag(task_id, "bug")
+    store.add_tag(task_id, "urgent")
+    store.remove_tag(task_id, "bug")
+    tags = store.get_tags(task_id)
+    assert "bug" not in tags
+    assert "urgent" in tags
+
+
+def test_remove_tag_nonexistent(store):
+    """Removing a non-existent tag is a no-op."""
+    task_id = store.add_task("Taggable", "desc")
+    store.remove_tag(task_id, "nonexistent")  # should not raise
+
+
+def test_get_tags_empty(store):
+    """A task with no tags returns an empty list."""
+    task_id = store.add_task("No tags", "desc")
+    tags = store.get_tags(task_id)
+    assert tags == []
+
+
+def test_add_task_with_tags(store):
+    """Tasks can be created with tags."""
+    task_id = store.add_task("Tagged task", "desc", tags=["bug", "frontend"])
+    task = store.get_task(task_id)
+    assert "bug" in task.tags
+    assert "frontend" in task.tags
+
+
+def test_row_to_task_includes_tags(store):
+    """_row_to_task populates tags field."""
+    task_id = store.add_task("Tagged task", "desc", tags=["backend"])
+    task = store.get_task(task_id)
+    assert task.tags == ["backend"]
+
+
+def test_list_tasks_filtered_by_tag(store):
+    """list_tasks can filter by tag."""
+    store.add_task("Bug task", "desc", tags=["bug"])
+    store.add_task("Feature task", "desc", tags=["feature"])
+    store.add_task("Both task", "desc", tags=["bug", "feature"])
+
+    bug_tasks = store.list_tasks(tag="bug")
+    assert len(bug_tasks) == 2
+    titles = [t.title for t in bug_tasks]
+    assert "Bug task" in titles
+    assert "Both task" in titles
+
+    feature_tasks = store.list_tasks(tag="feature")
+    assert len(feature_tasks) == 2
+    titles = [t.title for t in feature_tasks]
+    assert "Feature task" in titles
+    assert "Both task" in titles
+
+
+def test_list_tasks_filtered_by_tag_and_status(store):
+    """list_tasks can filter by both tag and status."""
+    id1 = store.add_task("Bug pending", "desc", tags=["bug"])
+    id2 = store.add_task("Bug in-progress", "desc", priority=10, tags=["bug"])
+    store.add_task("Feature pending", "desc", tags=["feature"])
+    store.get_next_task()  # moves highest priority (Bug in-progress) to in_progress
+
+    pending_bugs = store.list_tasks(status=TaskStatus.PENDING, tag="bug")
+    assert len(pending_bugs) == 1
+    assert pending_bugs[0].title == "Bug pending"
+
+
+def test_list_tasks_no_tag_filter_returns_all(store):
+    """list_tasks without tag filter returns all tasks."""
+    store.add_task("Task 1", "desc", tags=["bug"])
+    store.add_task("Task 2", "desc")
+    all_tasks = store.list_tasks()
+    assert len(all_tasks) == 2

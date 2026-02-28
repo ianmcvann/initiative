@@ -25,6 +25,7 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
         priority: int = 0,
         max_retries: int = 2,
         depends_on: Optional[Sequence[int]] = None,
+        tags: Optional[Sequence[str]] = None,
     ) -> str:
         """Add a new task to the Initiative queue.
 
@@ -34,11 +35,13 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
             priority: Higher number = higher priority (default 0)
             max_retries: Maximum number of automatic retries on failure (default 2)
             depends_on: List of task IDs that must complete before this task can start
+            tags: List of tags to categorize the task
         """
         deps = list(depends_on) if depends_on else None
-        logger.info("add_task called: title=%r priority=%d depends_on=%s", title, priority, deps)
-        task_id = store.add_task(title, description, priority, max_retries=max_retries, depends_on=deps)
-        return json.dumps({"task_id": task_id, "title": title, "status": "pending", "max_retries": max_retries, "depends_on": deps or []})
+        tag_list = list(tags) if tags else None
+        logger.info("add_task called: title=%r priority=%d depends_on=%s tags=%s", title, priority, deps, tag_list)
+        task_id = store.add_task(title, description, priority, max_retries=max_retries, depends_on=deps, tags=tag_list)
+        return json.dumps({"task_id": task_id, "title": title, "status": "pending", "max_retries": max_retries, "depends_on": deps or [], "tags": tag_list or []})
 
     @mcp.tool()
     async def get_next_task() -> str:
@@ -119,15 +122,46 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
         })
 
     @mcp.tool()
-    async def list_tasks(status: Optional[str] = None) -> str:
-        """List tasks, optionally filtered by status.
+    async def add_tag(task_id: int, tag: str) -> str:
+        """Add a tag to a task.
+
+        Args:
+            task_id: ID of the task to tag
+            tag: Tag string to add
+        """
+        logger.info("add_tag called: task_id=%d tag=%r", task_id, tag)
+        task = store.get_task(task_id)
+        if task is None:
+            return json.dumps({"error": "Task not found", "task_id": task_id})
+        store.add_tag(task_id, tag)
+        return json.dumps({"task_id": task_id, "tag": tag, "message": "Tag added"})
+
+    @mcp.tool()
+    async def remove_tag(task_id: int, tag: str) -> str:
+        """Remove a tag from a task.
+
+        Args:
+            task_id: ID of the task to remove the tag from
+            tag: Tag string to remove
+        """
+        logger.info("remove_tag called: task_id=%d tag=%r", task_id, tag)
+        task = store.get_task(task_id)
+        if task is None:
+            return json.dumps({"error": "Task not found", "task_id": task_id})
+        store.remove_tag(task_id, tag)
+        return json.dumps({"task_id": task_id, "tag": tag, "message": "Tag removed"})
+
+    @mcp.tool()
+    async def list_tasks(status: Optional[str] = None, tag: Optional[str] = None) -> str:
+        """List tasks, optionally filtered by status and/or tag.
 
         Args:
             status: Filter by status (pending, in_progress, completed, failed). Omit for all.
+            tag: Filter by tag. Only tasks with this tag will be returned.
         """
-        logger.info("list_tasks called: status=%r", status)
+        logger.info("list_tasks called: status=%r tag=%r", status, tag)
         task_status = TaskStatus(status) if status else None
-        tasks = store.list_tasks(status=task_status)
+        tasks = store.list_tasks(status=task_status, tag=tag)
         return json.dumps({"tasks": [t.to_dict() for t in tasks], "count": len(tasks)})
 
     @mcp.tool()

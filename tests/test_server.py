@@ -180,3 +180,90 @@ async def test_blocked_task_available_after_dep_completes(server):
     data = await call_tool(server, "get_next_task")
     assert data["title"] == "Blocked"
     assert data["blocked_by"] == []
+
+
+@pytest.mark.anyio
+async def test_add_task_with_tags(server):
+    """add_task accepts tags parameter."""
+    data = await call_tool(server, "add_task", {"title": "Tagged", "description": "d", "tags": ["bug", "urgent"]})
+    assert data["tags"] == ["bug", "urgent"]
+
+
+@pytest.mark.anyio
+async def test_add_task_without_tags(server):
+    """add_task without tags returns empty list."""
+    data = await call_tool(server, "add_task", {"title": "No tags", "description": "d"})
+    assert data["tags"] == []
+
+
+@pytest.mark.anyio
+async def test_add_tag_tool(server):
+    """add_tag tool adds a tag to a task."""
+    add_data = await call_tool(server, "add_task", {"title": "Task", "description": "d"})
+    task_id = add_data["task_id"]
+    data = await call_tool(server, "add_tag", {"task_id": task_id, "tag": "important"})
+    assert data["message"] == "Tag added"
+    assert data["tag"] == "important"
+    # Verify the tag appears when listing
+    tasks = await call_tool(server, "list_tasks")
+    assert "important" in tasks["tasks"][0]["tags"]
+
+
+@pytest.mark.anyio
+async def test_add_tag_task_not_found(server):
+    """add_tag on a non-existent task returns an error."""
+    data = await call_tool(server, "add_tag", {"task_id": 999, "tag": "bug"})
+    assert data["error"] == "Task not found"
+
+
+@pytest.mark.anyio
+async def test_remove_tag_tool(server):
+    """remove_tag tool removes a tag from a task."""
+    add_data = await call_tool(server, "add_task", {"title": "Task", "description": "d", "tags": ["bug", "urgent"]})
+    task_id = add_data["task_id"]
+    data = await call_tool(server, "remove_tag", {"task_id": task_id, "tag": "bug"})
+    assert data["message"] == "Tag removed"
+    # Verify the tag is gone
+    tasks = await call_tool(server, "list_tasks")
+    assert "bug" not in tasks["tasks"][0]["tags"]
+    assert "urgent" in tasks["tasks"][0]["tags"]
+
+
+@pytest.mark.anyio
+async def test_remove_tag_task_not_found(server):
+    """remove_tag on a non-existent task returns an error."""
+    data = await call_tool(server, "remove_tag", {"task_id": 999, "tag": "bug"})
+    assert data["error"] == "Task not found"
+
+
+@pytest.mark.anyio
+async def test_list_tasks_with_tag_filter(server):
+    """list_tasks can filter by tag."""
+    await call_tool(server, "add_task", {"title": "Bug", "description": "d", "tags": ["bug"]})
+    await call_tool(server, "add_task", {"title": "Feature", "description": "d", "tags": ["feature"]})
+    await call_tool(server, "add_task", {"title": "Both", "description": "d", "tags": ["bug", "feature"]})
+
+    data = await call_tool(server, "list_tasks", {"tag": "bug"})
+    assert data["count"] == 2
+    titles = [t["title"] for t in data["tasks"]]
+    assert "Bug" in titles
+    assert "Both" in titles
+
+    data = await call_tool(server, "list_tasks", {"tag": "feature"})
+    assert data["count"] == 2
+    titles = [t["title"] for t in data["tasks"]]
+    assert "Feature" in titles
+    assert "Both" in titles
+
+
+@pytest.mark.anyio
+async def test_list_tasks_with_tag_and_status_filter(server):
+    """list_tasks can filter by both tag and status."""
+    await call_tool(server, "add_task", {"title": "Bug1", "description": "d", "tags": ["bug"], "priority": 10})
+    await call_tool(server, "add_task", {"title": "Bug2", "description": "d", "tags": ["bug"]})
+    await call_tool(server, "add_task", {"title": "Feature", "description": "d", "tags": ["feature"]})
+    await call_tool(server, "get_next_task")  # moves Bug1 (highest priority) to in_progress
+
+    data = await call_tool(server, "list_tasks", {"tag": "bug", "status": "pending"})
+    assert data["count"] == 1
+    assert data["tasks"][0]["title"] == "Bug2"
