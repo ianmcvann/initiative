@@ -789,6 +789,79 @@ def test_update_task_updates_timestamp(store):
 # --- get_status with cancelled count ---
 
 
+# --- cascade cancel tests ---
+
+
+def test_cascade_cancel_single_level(store):
+    """Cancelling A cascades to B which depends on A."""
+    a_id = store.add_task("Task A", "desc")
+    b_id = store.add_task("Task B", "desc", depends_on=[a_id])
+    store.cancel_task(a_id)
+    b = store.get_task(b_id)
+    assert b.status == TaskStatus.CANCELLED
+
+
+def test_cascade_cancel_multi_level(store):
+    """Cancelling A cascades through A -> B -> C chain."""
+    a_id = store.add_task("Task A", "desc")
+    b_id = store.add_task("Task B", "desc", depends_on=[a_id])
+    c_id = store.add_task("Task C", "desc", depends_on=[b_id])
+    store.cancel_task(a_id)
+    b = store.get_task(b_id)
+    c = store.get_task(c_id)
+    assert b.status == TaskStatus.CANCELLED
+    assert c.status == TaskStatus.CANCELLED
+
+
+def test_cascade_cancel_partial(store):
+    """C depends on both A and B. Cancelling A cascades to C."""
+    a_id = store.add_task("Task A", "desc")
+    b_id = store.add_task("Task B", "desc")
+    c_id = store.add_task("Task C", "desc", depends_on=[a_id, b_id])
+    store.cancel_task(a_id)
+    c = store.get_task(c_id)
+    assert c.status == TaskStatus.CANCELLED
+    # B should be unaffected
+    b = store.get_task(b_id)
+    assert b.status == TaskStatus.PENDING
+
+
+def test_cascade_cancel_on_permanent_fail(store):
+    """Permanent failure of A cascades cancel to B."""
+    a_id = store.add_task("Task A", "desc", max_retries=0)
+    b_id = store.add_task("Task B", "desc", depends_on=[a_id])
+    # Move A to in_progress then fail it permanently
+    store.get_next_task()
+    store.fail_task(a_id, error="fatal")
+    a = store.get_task(a_id)
+    assert a.status == TaskStatus.FAILED
+    b = store.get_task(b_id)
+    assert b.status == TaskStatus.CANCELLED
+
+
+def test_cascade_cancel_skips_completed(store):
+    """Cascade does not cancel already-completed tasks."""
+    a_id = store.add_task("Task A", "desc")
+    b_id = store.add_task("Task B", "desc", depends_on=[a_id])
+    # Complete B first (by removing its dependency constraint manually to simulate)
+    # Instead, create B without dependency, complete it, then add the dependency
+    # Actually, let's just test with the real flow: complete B before cancelling A
+    # B can't be completed if it depends on A... so let's set up differently:
+    # A and B are independent. C depends on A. Complete C (make it independent first).
+    # Simpler: just force B to completed status directly.
+    store._conn.execute(
+        "UPDATE tasks SET status = ? WHERE id = ?",
+        (TaskStatus.COMPLETED.value, b_id),
+    )
+    store._conn.commit()
+    b = store.get_task(b_id)
+    assert b.status == TaskStatus.COMPLETED
+    # Now cancel A — B should stay completed
+    store.cancel_task(a_id)
+    b = store.get_task(b_id)
+    assert b.status == TaskStatus.COMPLETED
+
+
 def test_get_status_includes_cancelled(store):
     """get_status includes the cancelled count."""
     store.add_task("Task 1", "desc")

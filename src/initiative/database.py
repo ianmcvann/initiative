@@ -246,6 +246,7 @@ class TaskStore:
         if cursor.rowcount == 1:
             self._conn.commit()
             logger.info("Task permanently failed: id=%d", task_id)
+            self.cascade_cancel_dependents(task_id)
             return self.get_task(task_id)
         # Neither matched: task not found or not in_progress
         logger.warning("fail_task: task %d not found or not in_progress", task_id)
@@ -265,6 +266,8 @@ class TaskStore:
             self._conn.commit()
         if cursor.rowcount == 1:
             logger.info("Task cancelled: id=%d", task_id)
+            if _commit:
+                self.cascade_cancel_dependents(task_id)
             return True
         logger.warning("cancel_task: task %d not found or cannot cancel", task_id)
         return False
@@ -441,6 +444,32 @@ class TaskStore:
                 (limit, offset),
             ).fetchall()
         return [{"id": r["id"], "title": r["title"], "status": r["status"], "priority": r["priority"]} for r in rows], total
+
+    def cascade_cancel_dependents(self, task_id: int) -> int:
+        """Cancel all tasks that depend on the given task (directly or transitively).
+
+        Only cancels tasks that are still in 'pending' status.
+        Returns the number of tasks cancelled.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = self._conn.execute(
+            """WITH RECURSIVE dependents(id) AS (
+                SELECT task_id FROM task_dependencies WHERE depends_on_id = ?
+                UNION ALL
+                SELECT td.task_id FROM task_dependencies td
+                JOIN dependents d ON td.depends_on_id = d.id
+            )
+            UPDATE tasks SET status = ?, updated_at = ?
+            WHERE id IN (SELECT id FROM dependents) AND status = ?""",
+            (task_id, TaskStatus.CANCELLED.value, now, TaskStatus.PENDING.value),
+        )
+        count = cursor.rowcount
+        self._conn.commit()
+        if count > 0:
+            logger.info(
+                "Cascade cancelled %d dependent tasks for task %d", count, task_id
+            )
+        return count
 
     def get_blocked_by(self, task_id: int) -> list[int]:
         """Return IDs of uncompleted tasks that this task depends on."""
