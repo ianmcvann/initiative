@@ -1,15 +1,21 @@
 {
   "name": "initiative",
-  "description": "Autonomous AI task orchestration — never-stopping background worker",
+  "description": "Autonomous AI task orchestration for Claude Code",
   "version": "0.1.0",
   "author": {
     "name": "Ian McVann"
   },
-  "license": "MIT",
   "commands": "./.claude/commands/",
   "skills": "./.claude/skills/",
   "agents": [],
   "hooks": [
     "./.claude/hooks/session-start.json"
-  ]
+  ],
+  "mcpServers": {
+    "initiative": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}", "initiative"]
+    }
+  }
 }

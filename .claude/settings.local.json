@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(uv run:*)",
+      "Bash(printf:*)",
+      "Bash(gh api:*)",
+      "mcp__plugin_initiative_initiative__get_next_task",
+      "Bash(sqlite3:*)"
+    ]
+  }
+}
