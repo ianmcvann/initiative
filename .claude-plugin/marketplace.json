@@ -2,7 +2,7 @@
   "name": "initiative",
   "description": "Initiative - Autonomous AI task orchestration for Claude Code",
   "owner": {
-    "name": "Initiative"
+    "name": "Ian McVann"
   },
   "plugins": [
     {
@@ -13,7 +13,10 @@
         "name": "Ian McVann"
       },
       "source": "./",
-      "category": "productivity"
+      "category": "productivity",
+      "license": "MIT",
+      "repository": "https://github.com/ianmcvann/initiative",
+      "keywords": ["autonomous", "agent", "orchestration", "background", "automation", "queue", "task"]
     }
   ]
 }
