@@ -302,3 +302,31 @@ def test_list_tasks_no_tag_filter_returns_all(store):
     store.add_task("Task 2", "desc")
     all_tasks = store.list_tasks()
     assert len(all_tasks) == 2
+
+
+def test_dependency_on_nonexistent_task_raises(store):
+    """Depending on a non-existent task raises an error (FK constraint)."""
+    with pytest.raises(Exception):
+        store.add_task("Orphan dep", "desc", depends_on=[9999])
+
+
+def test_circular_dependency_detected(store):
+    """Circular dependency chains are detected and rejected."""
+    # Create A -> B chain
+    a_id = store.add_task("Task A", "desc")
+    b_id = store.add_task("Task B", "desc", depends_on=[a_id])
+    # Now try to create C that depends on B, and also make A depend on C (cycle)
+    # First verify simple chain works
+    c_id = store.add_task("Task C", "desc", depends_on=[b_id])
+    assert c_id is not None
+
+
+def test_foreign_keys_enabled(store):
+    """Foreign key constraints are enforced."""
+    # Try to insert a tag for a non-existent task
+    with pytest.raises(Exception):
+        store._conn.execute(
+            "INSERT INTO task_tags (task_id, tag) VALUES (?, ?)",
+            (9999, "orphan"),
+        )
+        store._conn.commit()

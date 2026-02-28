@@ -267,3 +267,63 @@ async def test_list_tasks_with_tag_and_status_filter(server):
     data = await call_tool(server, "list_tasks", {"tag": "bug", "status": "pending"})
     assert data["count"] == 1
     assert data["tasks"][0]["title"] == "Bug2"
+
+
+# --- Input validation tests ---
+
+
+@pytest.mark.anyio
+async def test_add_task_empty_title(server):
+    """add_task rejects empty title."""
+    data = await call_tool(server, "add_task", {"title": "", "description": "d"})
+    assert "error" in data
+
+
+@pytest.mark.anyio
+async def test_add_task_title_too_long(server):
+    """add_task rejects title over 1000 chars."""
+    data = await call_tool(server, "add_task", {"title": "x" * 1001, "description": "d"})
+    assert "error" in data
+
+
+@pytest.mark.anyio
+async def test_add_task_empty_description(server):
+    """add_task rejects empty description."""
+    data = await call_tool(server, "add_task", {"title": "T", "description": ""})
+    assert "error" in data
+
+
+@pytest.mark.anyio
+async def test_add_task_negative_priority(server):
+    """add_task rejects negative priority."""
+    data = await call_tool(server, "add_task", {"title": "T", "description": "d", "priority": -1})
+    assert "error" in data
+
+
+@pytest.mark.anyio
+async def test_add_task_priority_too_high(server):
+    """add_task rejects priority over 1000."""
+    data = await call_tool(server, "add_task", {"title": "T", "description": "d", "priority": 1001})
+    assert "error" in data
+
+
+@pytest.mark.anyio
+async def test_add_task_negative_max_retries(server):
+    """add_task rejects negative max_retries."""
+    data = await call_tool(server, "add_task", {"title": "T", "description": "d", "max_retries": -1})
+    assert "error" in data
+
+
+@pytest.mark.anyio
+async def test_add_task_too_many_tags(server):
+    """add_task rejects more than 50 tags."""
+    tags = [f"tag{i}" for i in range(51)]
+    data = await call_tool(server, "add_task", {"title": "T", "description": "d", "tags": tags})
+    assert "error" in data
+
+
+@pytest.mark.anyio
+async def test_list_tasks_invalid_status(server):
+    """list_tasks returns error for invalid status string."""
+    data = await call_tool(server, "list_tasks", {"status": "bogus"})
+    assert "error" in data

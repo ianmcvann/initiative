@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import sqlite3
 from datetime import datetime, timezone
-from pathlib import Path
 
 from .models import Task, TaskStatus
 
@@ -47,9 +46,10 @@ CREATE TABLE IF NOT EXISTS task_tags (
 class TaskStore:
     def __init__(self, db_path: str = "initiative.db"):
         self._db_path = db_path
-        self._conn = sqlite3.connect(db_path)
+        self._conn = sqlite3.connect(db_path, timeout=5.0)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(_SCHEMA)
         logger.debug("Database connected: %s", db_path)
 
@@ -62,6 +62,10 @@ class TaskStore:
         depends_on: list[int] | None = None,
         tags: list[str] | None = None,
     ) -> int:
+        if depends_on:
+            for dep_id in depends_on:
+                if self._would_create_cycle(dep_id, set()):
+                    raise ValueError(f"Circular dependency detected: task {dep_id} would create a cycle")
         now = datetime.now(timezone.utc).isoformat()
         cursor = self._conn.execute(
             "INSERT INTO tasks (title, description, priority, max_retries, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -83,6 +87,20 @@ class TaskStore:
         self._conn.commit()
         logger.info("Task added: id=%d title=%r depends_on=%s tags=%s", task_id, title, depends_on, tags)
         return task_id
+
+    def _would_create_cycle(self, task_id: int, visited: set[int]) -> bool:
+        """Check if adding a dependency on task_id would create a cycle."""
+        if task_id in visited:
+            return True
+        visited.add(task_id)
+        rows = self._conn.execute(
+            "SELECT depends_on_id FROM task_dependencies WHERE task_id = ?",
+            (task_id,),
+        ).fetchall()
+        for row in rows:
+            if self._would_create_cycle(row["depends_on_id"], visited):
+                return True
+        return False
 
     def get_task(self, task_id: int) -> Task | None:
         row = self._conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()

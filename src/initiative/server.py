@@ -14,6 +14,13 @@ from .models import TaskStatus
 logger = logging.getLogger("initiative.server")
 
 
+def _validate_task_id(task_id: int) -> str | None:
+    """Return error message if task_id is invalid, else None."""
+    if task_id <= 0:
+        return "task_id must be a positive integer"
+    return None
+
+
 def create_server(db_path: str = "initiative.db") -> FastMCP:
     mcp = FastMCP("initiative")
     store = TaskStore(db_path)
@@ -37,10 +44,32 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
             depends_on: List of task IDs that must complete before this task can start
             tags: List of tags to categorize the task
         """
+        # Input validation
+        if not title or not title.strip():
+            return json.dumps({"error": "title must not be empty"})
+        if len(title) > 1000:
+            return json.dumps({"error": "title must be 1000 characters or fewer"})
+        if not description or not description.strip():
+            return json.dumps({"error": "description must not be empty"})
+        if len(description) > 50000:
+            return json.dumps({"error": "description must be 50000 characters or fewer"})
+        if not 0 <= priority <= 1000:
+            return json.dumps({"error": "priority must be between 0 and 1000"})
+        if not 0 <= max_retries <= 100:
+            return json.dumps({"error": "max_retries must be between 0 and 100"})
         deps = list(depends_on) if depends_on else None
         tag_list = list(tags) if tags else None
+        if tag_list:
+            if len(tag_list) > 50:
+                return json.dumps({"error": "maximum 50 tags allowed"})
+            for t in tag_list:
+                if len(t) > 100:
+                    return json.dumps({"error": f"tag must be 100 characters or fewer: {t[:20]}..."})
         logger.info("add_task called: title=%r priority=%d depends_on=%s tags=%s", title, priority, deps, tag_list)
-        task_id = store.add_task(title, description, priority, max_retries=max_retries, depends_on=deps, tags=tag_list)
+        try:
+            task_id = store.add_task(title, description, priority, max_retries=max_retries, depends_on=deps, tags=tag_list)
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
         return json.dumps({"task_id": task_id, "title": title, "status": "pending", "max_retries": max_retries, "depends_on": deps or [], "tags": tag_list or []})
 
     @mcp.tool()
@@ -61,6 +90,9 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
             task_id: ID of the task to complete
             result: Summary of what was accomplished
         """
+        err = _validate_task_id(task_id)
+        if err:
+            return json.dumps({"error": err, "task_id": task_id})
         logger.info("complete_task called: task_id=%d", task_id)
         store.complete_task(task_id, result)
         return json.dumps({"task_id": task_id, "status": "completed", "result": result})
@@ -74,6 +106,9 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
             task_id: ID of the task that failed
             error: Description of what went wrong
         """
+        err = _validate_task_id(task_id)
+        if err:
+            return json.dumps({"error": err, "task_id": task_id})
         logger.info("fail_task called: task_id=%d", task_id)
         task = store.fail_task(task_id, error)
         if task is None:
@@ -103,6 +138,9 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
         Args:
             task_id: ID of the failed task to retry
         """
+        err = _validate_task_id(task_id)
+        if err:
+            return json.dumps({"error": err, "task_id": task_id})
         logger.info("retry_task called: task_id=%d", task_id)
         # Check current task status before attempting retry
         current = store.get_task(task_id)
@@ -129,6 +167,9 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
             task_id: ID of the task to tag
             tag: Tag string to add
         """
+        err = _validate_task_id(task_id)
+        if err:
+            return json.dumps({"error": err, "task_id": task_id})
         logger.info("add_tag called: task_id=%d tag=%r", task_id, tag)
         task = store.get_task(task_id)
         if task is None:
@@ -144,6 +185,9 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
             task_id: ID of the task to remove the tag from
             tag: Tag string to remove
         """
+        err = _validate_task_id(task_id)
+        if err:
+            return json.dumps({"error": err, "task_id": task_id})
         logger.info("remove_tag called: task_id=%d tag=%r", task_id, tag)
         task = store.get_task(task_id)
         if task is None:
@@ -160,7 +204,11 @@ def create_server(db_path: str = "initiative.db") -> FastMCP:
             tag: Filter by tag. Only tasks with this tag will be returned.
         """
         logger.info("list_tasks called: status=%r tag=%r", status, tag)
-        task_status = TaskStatus(status) if status else None
+        try:
+            task_status = TaskStatus(status) if status else None
+        except ValueError:
+            valid = ", ".join(str(s) for s in TaskStatus)
+            return json.dumps({"error": f"Invalid status. Must be one of: {valid}"})
         tasks = store.list_tasks(status=task_status, tag=tag)
         return json.dumps({"tasks": [t.to_dict() for t in tasks], "count": len(tasks)})
 
