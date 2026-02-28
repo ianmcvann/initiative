@@ -42,7 +42,7 @@ claude plugin install initiative@initiative
 
 ## Usage
 
-Initiative provides three commands:
+Initiative provides seven commands:
 
 ### `/initiative:start [direction]`
 
@@ -51,6 +51,14 @@ Start autonomous orchestration. Optionally provide a direction to seed the initi
 ```
 /initiative:start
 /initiative:start "Add authentication to the API"
+```
+
+### `/initiative:stop`
+
+Stop the orchestration loop and show a final status summary:
+
+```
+/initiative:stop
 ```
 
 ### `/initiative:status`
@@ -63,12 +71,36 @@ Check the current state of the task queue:
 
 Shows total tasks, counts by status, average completion time, throughput, and titles of any in-progress tasks.
 
-### `/initiative:stop`
+### `/initiative:add [task description]`
 
-Stop the orchestration loop and show a final status summary:
+Add a task to the queue without starting the orchestration loop:
 
 ```
-/initiative:stop
+/initiative:add "Refactor the database layer to use connection pooling"
+```
+
+### `/initiative:clear`
+
+Clear all pending tasks from the queue:
+
+```
+/initiative:clear
+```
+
+### `/initiative:view [task_id]`
+
+View details of a specific task by ID:
+
+```
+/initiative:view 42
+```
+
+### `/initiative:history`
+
+Show completed and failed task history:
+
+```
+/initiative:history
 ```
 
 ## Expert Panel
@@ -99,7 +131,7 @@ src/initiative/
 
 **Task Store** -- SQLite database with WAL journaling. Tasks have a title, description, priority (0-1000, higher = more urgent), status, tags, dependency tracking, auto-retry support, and timestamps. The priority queue returns the highest-priority pending task first (ties broken by creation time), skipping any task whose dependencies haven't completed yet.
 
-**MCP Server** -- Built on [FastMCP](https://github.com/jlowin/fastmcp), exposes 14 tools over stdio transport:
+**MCP Server** -- Built on [FastMCP](https://github.com/jlowin/fastmcp), exposes 16 tools over stdio transport:
 
 | Tool | Description |
 |------|-------------|
@@ -110,13 +142,15 @@ src/initiative/
 | `cancel_task` | Cancel a pending or in-progress task |
 | `update_task` | Update a pending task's title, description, or priority |
 | `retry_task` | Manually retry a failed task by resetting it to pending |
-| `list_tasks` | List tasks, optionally filtered by status and/or tag, with pagination |
-| `get_status` | Get queue summary (total, pending, in-progress, completed, failed, cancelled, throughput) |
-| `get_summary` | Lightweight task overview (id, title, status, priority only) -- saves context in long sessions |
 | `add_tag` | Add a tag to a task for categorization and filtering |
 | `remove_tag` | Remove a tag from a task |
+| `list_tasks` | List tasks, optionally filtered by status and/or tag, with pagination |
+| `get_task` | Get full details of a specific task by ID |
+| `get_status` | Get queue summary (total, pending, in-progress, completed, failed, cancelled, throughput) |
+| `get_summary` | Lightweight task overview (id, title, status, priority only) -- saves context in long sessions |
 | `recover_stale_tasks` | Reset tasks stuck in in-progress back to pending (recovers from crashes) |
 | `decompose_task` | Break a task into ordered subtasks with automatic dependency chaining |
+| `purge_completed` | Delete completed tasks (and optionally failed/cancelled) to clean up the queue |
 
 ### Task Statuses
 
